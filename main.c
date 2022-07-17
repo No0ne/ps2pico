@@ -109,10 +109,10 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
         }
         
         if(brk) {
-          if(report[i] == 0x46 ||
-            (report[i] >= 0x48 && report[i] <= 0x52) ||
-             report[i] == 0x54 || report[i] == 0x58 ||
-             report[i] == 0x65 || report[i] == 0x66) {
+          if(prev[i] == 0x46 ||
+            (prev[i] >= 0x48 && prev[i] <= 0x52) ||
+             prev[i] == 0x54 || prev[i] == 0x58 ||
+             prev[i] == 0x65 || prev[i] == 0x66) {
             ps2_send(0xe0);
           }
           
