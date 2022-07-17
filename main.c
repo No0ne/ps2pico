@@ -9,6 +9,8 @@
 #define CLKHALF 20
 #define DTDELAY 1000
 
+uint8_t prev[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+uint8_t const mod2ps2[] = { 0x14, 0x12, 0x11, 0x1f, 0x14, 0x59, 0x11, 0x27 };
 uint8_t const hid2ps2[] = {
   0x00, 0x00, 0xfc, 0x00, 0x1c, 0x32, 0x21, 0x23, 0x24, 0x2b, 0x34, 0x33, 0x43, 0x3b, 0x42, 0x4b,
   0x3a, 0x31, 0x44, 0x4d, 0x15, 0x2d, 0x1b, 0x2c, 0x3c, 0x2a, 0x1d, 0x22, 0x35, 0x1a, 0x16, 0x1e,
@@ -67,12 +69,44 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
   if(tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_KEYBOARD) {
     board_led_write(1);
     
-    //for(uint8_t i = 2; i < 8; i++) {
-    uint8_t i = 2;
-      if(report[i]) {
-        ps2_send(hid2ps2[report[i]]);
+    for(uint8_t i = 0; i < 8; i++) {
+      if(report[i] != prev[i]) {
+        
+        if(i == 0) {
+          uint8_t rbits = report[i];
+          uint8_t pbits = prev[i];
+          
+          for(uint8_t j = 0; j < 8; j++) {
+            
+            if((rbits & 0x01) != (pbits & 0x01)) {
+              if(j > 2 && j != 5) ps2_send(0xe0);
+              
+              if(rbits & 0x01) {
+                ps2_send(mod2ps2[j]);
+              } else {
+                ps2_send(0xf0);
+                ps2_send(mod2ps2[j]);
+              }
+            }
+            
+            rbits = rbits >> 1;
+            pbits = pbits >> 1;
+            
+          }
+        } else if(i > 1) {
+          
+          if(report[i]) {
+            ps2_send(hid2ps2[report[i]]);
+          } else {
+            ps2_send(0xf0);
+            ps2_send(hid2ps2[prev[i]]);
+          }
+          
+        }
+        
+        prev[i] = report[i];
       }
-    //}
+    }
     
     board_led_write(0);
   }
