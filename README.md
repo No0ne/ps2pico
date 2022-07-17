@@ -4,6 +4,8 @@ USB keyboard to PS/2 interface converter using a Raspberry Pi Pico
 WORK-IN-PROGRESS
 (final version will be written in Rust https://github.com/No0ne/ps2pico-rs)
 
+**Currently NOT working: key repeat, keyboard leds (num, caps and scroll lock)**
+
 # Usage
 Copy `ps2pico.uf2` to your Pi Pico by pressing BOOTSEL before pluggging in.
 
@@ -37,3 +39,6 @@ cd build
 cmake ..
 make
 ```
+
+# Resources
+https://download.microsoft.com/download/1/6/1/161ba512-40e2-4cc9-843a-923143f3456c/translate.pdf
