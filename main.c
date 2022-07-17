@@ -9,6 +9,13 @@
 #define CLKHALF 20
 #define DTDELAY 1000
 
+#define DELAYMS 250
+#define REPEATUS 33330
+
+alarm_id_t alarm;
+uint8_t repeat = 0;
+bool repeating = false;
+
 uint8_t prev[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 uint8_t const mod2ps2[] = { 0x14, 0x12, 0x11, 0x1f, 0x14, 0x59, 0x11, 0x27 };
 uint8_t const hid2ps2[] = {
@@ -49,6 +56,16 @@ void ps2_send(uint8_t data) {
   sleep_us(DTDELAY);
 }
 
+int64_t repeat_callback(alarm_id_t id, void *user_data) {
+  if(repeat) {
+    repeating = true;
+    return REPEATUS;
+  }
+  
+  alarm = 0;
+  return 0;
+}
+
 void main() {
   board_init();
   
@@ -60,7 +77,24 @@ void main() {
   gpio_put(DATGPIO, !1);
   
   tusb_init();
-  while (1) { tuh_task(); }
+  while (1) {
+    tuh_task();
+    
+    if(repeating) {
+      repeating = false;
+      
+      if(repeat) {
+        if(repeat == 0x46 ||
+          (repeat >= 0x48 && repeat <= 0x52) ||
+           repeat == 0x54 || repeat == 0x58 ||
+           repeat == 0x65 || repeat == 0x66) {
+          ps2_send(0xe0);
+        }
+        
+        ps2_send(hid2ps2[repeat]);
+      }
+    }
+  }
 }
 
 void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_report, uint16_t desc_len) {
@@ -109,6 +143,8 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
         }
         
         if(brk) {
+          repeat = 0;
+          
           if(prev[i] == 0x46 ||
             (prev[i] >= 0x48 && prev[i] <= 0x52) ||
              prev[i] == 0x54 || prev[i] == 0x58 ||
@@ -132,6 +168,10 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
         }
         
         if(make) {
+          repeat = report[i];
+          if(alarm) cancel_alarm(alarm);
+          alarm = add_alarm_in_ms(DELAYMS, repeat_callback, NULL, false);
+          
           if(report[i] == 0x46 ||
             (report[i] >= 0x48 && report[i] <= 0x52) ||
              report[i] == 0x54 || report[i] == 0x58 ||
