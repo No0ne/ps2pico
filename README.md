@@ -1,6 +1,9 @@
 # ps2pico
 USB keyboard to PS/2 interface converter using a Raspberry Pi Pico
 
+WORK-IN-PROGRESS
+(final version will be written in Rust https://github.com/No0ne/ps2pico-rs)
+
 # Usage
 Copy `ps2pico.uf2` to your Pi Pico by pressing BOOTSEL before pluggging in.
 
@@ -25,9 +28,6 @@ GPIO 16 ___|2k2 |____|/   BC547
                        |
                   _____|__GND
 ```
-
-WORK-IN-PROGRESS
-(final version will be written in Rust https://github.com/No0ne/ps2pico-rs)
 
 # Build
 ```
