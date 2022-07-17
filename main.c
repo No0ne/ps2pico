@@ -1,21 +1,48 @@
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-
 #include "hardware/gpio.h"
 #include "bsp/board.h"
 #include "tusb.h"
 
 #define CLKGPIO 15
 #define DATGPIO 16
+
 #define CLKFULL 40
 #define CLKHALF 20
+#define DTDELAY 1000
 
-uint8_t const map[] = {
-  0x00, 0xff, 0xfc, 0x00, 0x1c, 0x32, 0x21, 0x23, 0x24, 0x2b, 0x34, 0x33, 0x43, 0x3b, 0x42, 0x4b,
+uint8_t const hid2ps2[] = {
+  0x00, 0x00, 0xfc, 0x00, 0x1c, 0x32, 0x21, 0x23, 0x24, 0x2b, 0x34, 0x33, 0x43, 0x3b, 0x42, 0x4b,
   0x3a, 0x31, 0x44, 0x4d, 0x15, 0x2d, 0x1b, 0x2c, 0x3c, 0x2a, 0x1d, 0x22, 0x35, 0x1a, 0x16, 0x1e,
-  0x26, 0x25, 0x2e, 0x36, 0x3d, 0x3e, 0x46, 0x45, 0x5a, 0x76, 0x66, 0x0d, 0x29, 0x4e
+  0x26, 0x25, 0x2e, 0x36, 0x3d, 0x3e, 0x46, 0x45, 0x5a, 0x76, 0x66, 0x0d, 0x29, 0x4e, 0x55, 0x54,
+  0x5b, 0x5d, 0x5d, 0x4c, 0x52, 0x0e, 0x41, 0x49, 0x4a, 0x58, 0x05, 0x06, 0x04, 0x0c, 0x03, 0x0b,
+  0x83, 0x0a, 0x01, 0x09, 0x78, 0x07
 };
+
+void ps2_send(uint8_t data) {
+  uint8_t parity = 1;
+  
+  gpio_put(DATGPIO, !0); sleep_us(CLKHALF);
+  gpio_put(CLKGPIO, !0); sleep_us(CLKFULL);
+  gpio_put(CLKGPIO, !1); sleep_us(CLKHALF);
+  
+  for(uint8_t i = 0; i < 8; i++) {
+    gpio_put(DATGPIO, !(data & 0x01)); sleep_us(CLKHALF);
+    gpio_put(CLKGPIO, !0); sleep_us(CLKFULL);
+    gpio_put(CLKGPIO, !1); sleep_us(CLKHALF);
+  
+    parity = parity ^ (data & 0x01);
+    data = data >> 1;
+  }
+  
+  gpio_put(DATGPIO, !parity); sleep_us(CLKHALF);
+  gpio_put(CLKGPIO, !0); sleep_us(CLKFULL);
+  gpio_put(CLKGPIO, !1); sleep_us(CLKHALF);
+  
+  gpio_put(DATGPIO, !1); sleep_us(CLKHALF);
+  gpio_put(CLKGPIO, !0); sleep_us(CLKFULL);
+  gpio_put(CLKGPIO, !1); sleep_us(CLKHALF);
+  
+  sleep_us(DTDELAY);
+}
 
 void main() {
   board_init();
@@ -43,45 +70,7 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
     //for(uint8_t i = 2; i < 8; i++) {
     uint8_t i = 2;
       if(report[i]) {
-        uint8_t data = map[report[i]];
-        uint8_t parity = 1;
-        
-        gpio_put(DATGPIO, !0);
-        sleep_us(20);
-        gpio_put(CLKGPIO, !0);
-        sleep_us(40);
-        gpio_put(CLKGPIO, !1);
-        sleep_us(20);
-        
-        for(uint8_t j = 0; j < 8; j++) {
-          
-          gpio_put(DATGPIO, !(data & 0x01));
-          
-          sleep_us(20);
-          gpio_put(CLKGPIO, !0);
-          sleep_us(40);
-          gpio_put(CLKGPIO, !1);
-          sleep_us(20);
-      
-          parity = parity ^ (data & 0x01);
-          data = data >> 1;
-          
-        }
-        
-        gpio_put(DATGPIO, !parity);
-        
-        sleep_us(20);
-        gpio_put(CLKGPIO, !0);
-        sleep_us(40);
-        gpio_put(CLKGPIO, !1);
-        sleep_us(20);
-        
-        gpio_put(DATGPIO, !1);
-        sleep_us(20);
-        gpio_put(CLKGPIO, !0);
-        sleep_us(40);
-        gpio_put(CLKGPIO, !1);
-        sleep_us(20);
+        ps2_send(hid2ps2[report[i]]);
       }
     //}
     

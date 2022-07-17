@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.13)
 
-# [Platfrom specific command] Pull in Raspberry Pi Pico SDK
+# Pull in Raspberry Pi Pico SDK
 include(~/pico-sdk/external/pico_sdk_import.cmake)
 
 project(ps2pico)
 
-# [Platfrom specific command] Initialize the Raspberry Pi Pico SDK
+# Initialize the Raspberry Pi Pico SDK
 pico_sdk_init()
 
 add_executable(ps2pico main.c)
