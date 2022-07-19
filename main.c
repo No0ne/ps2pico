@@ -15,6 +15,11 @@
 alarm_id_t alarm;
 uint8_t repeat = 0;
 bool repeating = false;
+bool sending = false;
+bool receiving = false;
+
+uint8_t kbd_addr;
+uint8_t kbd_inst;
 
 uint8_t prev[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 uint8_t const mod2ps2[] = { 0x14, 0x12, 0x11, 0x1f, 0x14, 0x59, 0x11, 0x27 };
@@ -29,8 +34,12 @@ uint8_t const hid2ps2[] = {
   0x48, 0x50, 0x57, 0x5f
 };
 
-void ps2_send(uint8_t data) {
+bool ps2_send(uint8_t data) {
+  if(!gpio_get(14)) return false;
+  if(!gpio_get(17)) return false;
+  
   uint8_t parity = 1;
+  sending = true;
   
   gpio_put(DATGPIO, !0); sleep_us(CLKHALF);
   gpio_put(CLKGPIO, !0); sleep_us(CLKFULL);
@@ -53,7 +62,78 @@ void ps2_send(uint8_t data) {
   gpio_put(CLKGPIO, !0); sleep_us(CLKFULL);
   gpio_put(CLKGPIO, !1); sleep_us(CLKHALF);
   
+  sending = false;
   sleep_us(DTDELAY);
+  return true;
+}
+
+void ps2_receive() {
+  sending = true;
+  uint16_t data = 0x00;
+  uint16_t bit = 0x01;
+  
+  uint8_t cp = 1;
+  uint8_t rp = 0;
+  
+  sleep_us(CLKHALF);
+  sleep_us(CLKHALF);
+  gpio_put(CLKGPIO, !0); sleep_us(CLKFULL);
+  gpio_put(CLKGPIO, !1); sleep_us(CLKHALF);
+
+  while(bit < 0x0100) {
+    if(gpio_get(17)) {
+      data = data | bit;
+      cp = cp ^ 1;
+    } else {
+      cp = cp ^ 0;
+    }
+
+    bit = bit << 1;
+    
+    sleep_us(CLKHALF);
+    gpio_put(CLKGPIO, !0); sleep_us(CLKFULL);
+    gpio_put(CLKGPIO, !1); sleep_us(CLKHALF);
+  }
+
+  rp = gpio_get(17);
+
+  sleep_us(CLKHALF);
+  gpio_put(CLKGPIO, !0); sleep_us(CLKFULL);
+  gpio_put(CLKGPIO, !1); sleep_us(CLKHALF);
+
+  sleep_us(CLKHALF);
+  gpio_put(DATGPIO, !0);
+  gpio_put(CLKGPIO, !0); sleep_us(CLKFULL);
+  gpio_put(CLKGPIO, !1); sleep_us(CLKHALF);
+  gpio_put(DATGPIO, !1);
+  
+  uint8_t c = data & 0x00ff;
+  sending = false;
+  
+  if(c == 0xff) {
+    while(!ps2_send(0xaa));
+    return;
+  }
+  
+  if(c != 0xed) {
+           if(c == 1) { uint8_t static value = 4; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
+    } else if(c == 2) { uint8_t static value = 1; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
+    } else if(c == 3) { uint8_t static value = 5; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
+    } else if(c == 4) { uint8_t static value = 2; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
+    } else if(c == 5) { uint8_t static value = 6; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
+    } else if(c == 6) { uint8_t static value = 3; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
+    } else if(c == 7) { uint8_t static value = 7; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
+               } else { uint8_t static value = 0; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
+    }
+  }
+  
+  ps2_send(0xfa);
+
+  /* if (rp == cp) {
+    return;
+  } else {
+    return;
+  }*/
 }
 
 int64_t repeat_callback(alarm_id_t id, void *user_data) {
@@ -66,15 +146,27 @@ int64_t repeat_callback(alarm_id_t id, void *user_data) {
   return 0;
 }
 
+void gpio_callback(uint gpio, uint32_t events) {
+  if(!sending) {
+    receiving = true;
+  }
+}
+
 void main() {
   board_init();
   
   gpio_init(CLKGPIO);
   gpio_init(DATGPIO);
+  gpio_init(14);
+  gpio_init(17);
   gpio_set_dir(CLKGPIO, GPIO_OUT);
   gpio_set_dir(DATGPIO, GPIO_OUT);
+  gpio_set_dir(14, GPIO_IN);
+  gpio_set_dir(17, GPIO_IN);
   gpio_put(CLKGPIO, !1);
   gpio_put(DATGPIO, !1);
+  
+  gpio_set_irq_enabled_with_callback(14, GPIO_IRQ_EDGE_RISE, true, &gpio_callback);
   
   tusb_init();
   while (1) {
@@ -94,10 +186,17 @@ void main() {
         ps2_send(hid2ps2[repeat]);
       }
     }
+    
+    if(receiving) {
+      receiving = false;
+      ps2_receive();
+    }
   }
 }
 
 void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_report, uint16_t desc_len) {
+  kbd_addr = dev_addr;
+  kbd_inst = instance;
   tuh_hid_receive_report(dev_addr, instance);
 }
 
@@ -105,6 +204,9 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
 
   if(tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_KEYBOARD) {
     board_led_write(1);
+    
+    kbd_addr = dev_addr;
+    kbd_inst = instance;
     
     if(report[0] != prev[0]) {
       uint8_t rbits = report[0];

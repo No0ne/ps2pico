@@ -39,7 +39,7 @@ make
 ```
 
 # Resources
-https://wiki.osdev.org/PS/2_Keyboard
-https://github.com/Harvie/ps2dev/blob/master/src/ps2dev.cpp
-http://www.lucadavidian.com/2017/11/15/interfacing-ps2-keyboard-to-a-microcontroller/
-https://download.microsoft.com/download/1/6/1/161ba512-40e2-4cc9-843a-923143f3456c/translate.pdf
+* https://wiki.osdev.org/PS/2_Keyboard
+* https://github.com/Harvie/ps2dev/blob/master/src/ps2dev.cpp
+* http://www.lucadavidian.com/2017/11/15/interfacing-ps2-keyboard-to-a-microcontroller/
+* https://download.microsoft.com/download/1/6/1/161ba512-40e2-4cc9-843a-923143f3456c/translate.pdf
