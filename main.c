@@ -2,14 +2,16 @@
 #include "bsp/board.h"
 #include "tusb.h"
 
-#define CLKGPIO 15
-#define DATGPIO 16
+#define CLKIN  14
+#define CLKOUT 15
+#define DTIN   17
+#define DTOUT  16
 
 #define CLKFULL 40
 #define CLKHALF 20
 #define DTDELAY 1000
 
-#define DELAYMS 250
+#define DELAYMS  250
 #define REPEATUS 33330
 
 alarm_id_t alarm;
@@ -21,7 +23,8 @@ bool receiving = false;
 uint8_t kbd_addr;
 uint8_t kbd_inst;
 
-uint8_t prev[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+uint8_t prevhid[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+uint8_t prevps2 = 0;
 uint8_t const mod2ps2[] = { 0x14, 0x12, 0x11, 0x1f, 0x14, 0x59, 0x11, 0x27 };
 uint8_t const hid2ps2[] = {
   0x00, 0x00, 0xfc, 0x00, 0x1c, 0x32, 0x21, 0x23, 0x24, 0x2b, 0x34, 0x33, 0x43, 0x3b, 0x42, 0x4b,
@@ -35,35 +38,37 @@ uint8_t const hid2ps2[] = {
 };
 
 bool ps2_send(uint8_t data) {
-  if(!gpio_get(14)) return false;
-  if(!gpio_get(17)) return false;
+  sleep_us(DTDELAY);
+  
+  if(!gpio_get(CLKIN)) return false;
+  if(!gpio_get(DTIN)) return false;
   
   uint8_t parity = 1;
   sending = true;
   
-  gpio_put(DATGPIO, !0); sleep_us(CLKHALF);
-  gpio_put(CLKGPIO, !0); sleep_us(CLKFULL);
-  gpio_put(CLKGPIO, !1); sleep_us(CLKHALF);
+  gpio_put(DTOUT, !0); sleep_us(CLKHALF);
+  gpio_put(CLKOUT, !0); sleep_us(CLKFULL);
+  gpio_put(CLKOUT, !1); sleep_us(CLKHALF);
   
   for(uint8_t i = 0; i < 8; i++) {
-    gpio_put(DATGPIO, !(data & 0x01)); sleep_us(CLKHALF);
-    gpio_put(CLKGPIO, !0); sleep_us(CLKFULL);
-    gpio_put(CLKGPIO, !1); sleep_us(CLKHALF);
+    gpio_put(DTOUT, !(data & 0x01)); sleep_us(CLKHALF);
+    gpio_put(CLKOUT, !0); sleep_us(CLKFULL);
+    gpio_put(CLKOUT, !1); sleep_us(CLKHALF);
   
     parity = parity ^ (data & 0x01);
     data = data >> 1;
   }
   
-  gpio_put(DATGPIO, !parity); sleep_us(CLKHALF);
-  gpio_put(CLKGPIO, !0); sleep_us(CLKFULL);
-  gpio_put(CLKGPIO, !1); sleep_us(CLKHALF);
+  gpio_put(DTOUT, !parity); sleep_us(CLKHALF);
+  gpio_put(CLKOUT, !0); sleep_us(CLKFULL);
+  gpio_put(CLKOUT, !1); sleep_us(CLKHALF);
   
-  gpio_put(DATGPIO, !1); sleep_us(CLKHALF);
-  gpio_put(CLKGPIO, !0); sleep_us(CLKFULL);
-  gpio_put(CLKGPIO, !1); sleep_us(CLKHALF);
+  gpio_put(DTOUT, !1); sleep_us(CLKHALF);
+  gpio_put(CLKOUT, !0); sleep_us(CLKFULL);
+  gpio_put(CLKOUT, !1); sleep_us(CLKHALF);
   
+  // ?? sleep_us(DTDELAY);
   sending = false;
-  sleep_us(DTDELAY);
   return true;
 }
 
@@ -76,12 +81,11 @@ void ps2_receive() {
   uint8_t rp = 0;
   
   sleep_us(CLKHALF);
-  sleep_us(CLKHALF);
-  gpio_put(CLKGPIO, !0); sleep_us(CLKFULL);
-  gpio_put(CLKGPIO, !1); sleep_us(CLKHALF);
+  gpio_put(CLKOUT, !0); sleep_us(CLKFULL);
+  gpio_put(CLKOUT, !1); sleep_us(CLKHALF);
 
   while(bit < 0x0100) {
-    if(gpio_get(17)) {
+    if(gpio_get(DTIN)) {
       data = data | bit;
       cp = cp ^ 1;
     } else {
@@ -91,49 +95,50 @@ void ps2_receive() {
     bit = bit << 1;
     
     sleep_us(CLKHALF);
-    gpio_put(CLKGPIO, !0); sleep_us(CLKFULL);
-    gpio_put(CLKGPIO, !1); sleep_us(CLKHALF);
+    gpio_put(CLKOUT, !0); sleep_us(CLKFULL);
+    gpio_put(CLKOUT, !1); sleep_us(CLKHALF);
   }
 
-  rp = gpio_get(17);
+  rp = gpio_get(DTIN);
 
   sleep_us(CLKHALF);
-  gpio_put(CLKGPIO, !0); sleep_us(CLKFULL);
-  gpio_put(CLKGPIO, !1); sleep_us(CLKHALF);
+  gpio_put(CLKOUT, !0); sleep_us(CLKFULL);
+  gpio_put(CLKOUT, !1); sleep_us(CLKHALF);
 
   sleep_us(CLKHALF);
-  gpio_put(DATGPIO, !0);
-  gpio_put(CLKGPIO, !0); sleep_us(CLKFULL);
-  gpio_put(CLKGPIO, !1); sleep_us(CLKHALF);
-  gpio_put(DATGPIO, !1);
+  gpio_put(DTOUT, !0);
+  gpio_put(CLKOUT, !0); sleep_us(CLKFULL);
+  gpio_put(CLKOUT, !1); sleep_us(CLKHALF);
+  gpio_put(DTOUT, !1);
   
-  uint8_t c = data & 0x00ff;
+  uint8_t received = data & 0x00ff;
   sending = false;
   
-  if(c == 0xff) {
-    while(!ps2_send(0xaa));
-    return;
-  }
-  
-  if(c != 0xed) {
-           if(c == 1) { uint8_t static value = 4; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
-    } else if(c == 2) { uint8_t static value = 1; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
-    } else if(c == 3) { uint8_t static value = 5; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
-    } else if(c == 4) { uint8_t static value = 2; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
-    } else if(c == 5) { uint8_t static value = 6; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
-    } else if(c == 6) { uint8_t static value = 3; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
-    } else if(c == 7) { uint8_t static value = 7; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
-               } else { uint8_t static value = 0; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
+  if(rp == cp) {
+    
+    if(received == 0xff) {
+      while(!ps2_send(0xaa));
+      return;
     }
-  }
-  
-  ps2_send(0xfa);
-
-  /* if (rp == cp) {
-    return;
+    
+    if(prevps2 == 0xed) {
+             if(received == 1) { uint8_t static value = 4; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
+      } else if(received == 2) { uint8_t static value = 1; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
+      } else if(received == 3) { uint8_t static value = 5; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
+      } else if(received == 4) { uint8_t static value = 2; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
+      } else if(received == 5) { uint8_t static value = 6; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
+      } else if(received == 6) { uint8_t static value = 3; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
+      } else if(received == 7) { uint8_t static value = 7; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
+                 } else { uint8_t static value = 0; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
+      }
+    }
+    
+    prevps2 = received;
+    ps2_send(0xfa);
+    
   } else {
-    return;
-  }*/
+    ps2_send(0xfe);
+  }
 }
 
 int64_t repeat_callback(alarm_id_t id, void *user_data) {
@@ -147,7 +152,7 @@ int64_t repeat_callback(alarm_id_t id, void *user_data) {
 }
 
 void gpio_callback(uint gpio, uint32_t events) {
-  if(!sending) {
+  if(!sending && !gpio_get(DTIN)) {
     receiving = true;
   }
 }
@@ -155,18 +160,18 @@ void gpio_callback(uint gpio, uint32_t events) {
 void main() {
   board_init();
   
-  gpio_init(CLKGPIO);
-  gpio_init(DATGPIO);
-  gpio_init(14);
-  gpio_init(17);
-  gpio_set_dir(CLKGPIO, GPIO_OUT);
-  gpio_set_dir(DATGPIO, GPIO_OUT);
-  gpio_set_dir(14, GPIO_IN);
-  gpio_set_dir(17, GPIO_IN);
-  gpio_put(CLKGPIO, !1);
-  gpio_put(DATGPIO, !1);
+  gpio_init(CLKOUT);
+  gpio_init(DTOUT);
+  gpio_init(CLKIN);
+  gpio_init(DTIN);
+  gpio_set_dir(CLKOUT, GPIO_OUT);
+  gpio_set_dir(DTOUT, GPIO_OUT);
+  gpio_set_dir(CLKIN, GPIO_IN);
+  gpio_set_dir(DTIN, GPIO_IN);
+  gpio_put(CLKOUT, !1);
+  gpio_put(DTOUT, !1);
   
-  gpio_set_irq_enabled_with_callback(14, GPIO_IRQ_EDGE_RISE, true, &gpio_callback);
+  gpio_set_irq_enabled_with_callback(CLKIN, GPIO_IRQ_EDGE_RISE, true, &gpio_callback);
   
   tusb_init();
   while (1) {
@@ -208,9 +213,9 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
     kbd_addr = dev_addr;
     kbd_inst = instance;
     
-    if(report[0] != prev[0]) {
+    if(report[0] != prevhid[0]) {
       uint8_t rbits = report[0];
-      uint8_t pbits = prev[0];
+      uint8_t pbits = prevhid[0];
       
       for(uint8_t j = 0; j < 8; j++) {
         
@@ -230,15 +235,15 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
         
       }
       
-      prev[0] = report[0];
+      prevhid[0] = report[0];
     }
     
     for(uint8_t i = 2; i < 8; i++) {
-      if(prev[i]) {
+      if(prevhid[i]) {
         bool brk = true;
         
         for(uint8_t j = 2; j < 8; j++) {
-          if(prev[i] == report[j]) {
+          if(prevhid[i] == report[j]) {
             brk = false;
             break;
           }
@@ -247,15 +252,15 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
         if(brk) {
           repeat = 0;
           
-          if(prev[i] == 0x46 ||
-            (prev[i] >= 0x48 && prev[i] <= 0x52) ||
-             prev[i] == 0x54 || prev[i] == 0x58 ||
-             prev[i] == 0x65 || prev[i] == 0x66) {
+          if(prevhid[i] == 0x46 ||
+            (prevhid[i] >= 0x48 && prevhid[i] <= 0x52) ||
+             prevhid[i] == 0x54 || prevhid[i] == 0x58 ||
+             prevhid[i] == 0x65 || prevhid[i] == 0x66) {
             ps2_send(0xe0);
           }
           
           ps2_send(0xf0);
-          ps2_send(hid2ps2[prev[i]]);
+          ps2_send(hid2ps2[prevhid[i]]);
         }
       }
       
@@ -263,7 +268,7 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
         bool make = true;
         
         for(uint8_t j = 2; j < 8; j++) {
-          if(report[i] == prev[j]) {
+          if(report[i] == prevhid[j]) {
             make = false;
             break;
           }
@@ -285,7 +290,7 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
         }
       }
       
-      prev[i] = report[i];
+      prevhid[i] = report[i];
     }
     
     board_led_write(0);
