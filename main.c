@@ -11,14 +11,13 @@
 #define CLKHALF 20
 #define DTDELAY 1000
 
-#define DELAYMS  250
-#define REPEATUS 33330
-
-alarm_id_t alarm;
+alarm_id_t repeater;
+uint32_t repeatus = 35000;
+uint16_t delayms = 250;
 uint8_t repeat = 0;
 bool repeating = false;
-bool sending = false;
 bool receiving = false;
+bool sending = false;
 
 uint8_t kbd_addr;
 uint8_t kbd_inst;
@@ -36,6 +35,13 @@ uint8_t const hid2ps2[] = {
   0x75, 0x7d, 0x70, 0x71, 0x61, 0x2f, 0x37, 0x0f, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38, 0x40,
   0x48, 0x50, 0x57, 0x5f
 };
+
+bool ps2_is_e0(uint8_t data) {
+  return data == 0x46 ||
+         data >= 0x48 && data <= 0x52 ||
+         data == 0x54 || data == 0x58 ||
+         data == 0x65 || data == 0x66;
+}
 
 bool ps2_send(uint8_t data) {
   sleep_us(DTDELAY);
@@ -67,7 +73,6 @@ bool ps2_send(uint8_t data) {
   gpio_put(CLKOUT, !0); sleep_us(CLKFULL);
   gpio_put(CLKOUT, !1); sleep_us(CLKHALF);
   
-  // ?? sleep_us(DTDELAY);
   sending = false;
   return true;
 }
@@ -119,9 +124,30 @@ void ps2_receive() {
     if(received == 0xff) {
       while(!ps2_send(0xaa));
       return;
+      
+    } else if(received == 0xee) {
+      ps2_send(0xee);
+      return;
+      
+    } else if(received == 0xf2) {
+      ps2_send(0xfa);
+      ps2_send(0xab);
+      ps2_send(0x83);
+      return;
     }
     
-    if(prevps2 == 0xed) {
+    if(prevps2 == 0xf3) {
+      repeatus = received & 0x1f;
+      delayms = received & 0x60;
+      
+      repeatus = 35000 + repeatus * 15000;
+      
+      if(delayms == 0x00) delayms = 250;
+      if(delayms == 0x20) delayms = 500;
+      if(delayms == 0x40) delayms = 750;
+      if(delayms == 0x60) delayms = 1000;
+      
+    } else if(prevps2 == 0xed) {
       if(received == 1) { uint8_t static value = 4; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1); } else
       if(received == 2) { uint8_t static value = 1; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1); } else
       if(received == 3) { uint8_t static value = 5; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1); } else
@@ -143,10 +169,10 @@ void ps2_receive() {
 int64_t repeat_callback(alarm_id_t id, void *user_data) {
   if(repeat) {
     repeating = true;
-    return REPEATUS;
+    return repeatus;
   }
   
-  alarm = 0;
+  repeater = 0;
   return 0;
 }
 
@@ -173,20 +199,14 @@ void main() {
   gpio_set_irq_enabled_with_callback(CLKIN, GPIO_IRQ_EDGE_RISE, true, &gpio_callback);
   
   tusb_init();
-  while (1) {
+  while(true) {
     tuh_task();
     
     if(repeating) {
       repeating = false;
       
       if(repeat) {
-        if(repeat == 0x46 ||
-          (repeat >= 0x48 && repeat <= 0x52) ||
-           repeat == 0x54 || repeat == 0x58 ||
-           repeat == 0x65 || repeat == 0x66) {
-          ps2_send(0xe0);
-        }
-        
+        if(ps2_is_e0(repeat)) ps2_send(0xe0);
         ps2_send(hid2ps2[repeat]);
       }
     }
@@ -249,15 +269,10 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
         }
         
         if(brk) {
+          if(prevhid[i] == 0x48) continue;
           repeat = 0;
           
-          if(prevhid[i] == 0x46 ||
-            (prevhid[i] >= 0x48 && prevhid[i] <= 0x52) ||
-             prevhid[i] == 0x54 || prevhid[i] == 0x58 ||
-             prevhid[i] == 0x65 || prevhid[i] == 0x66) {
-            ps2_send(0xe0);
-          }
-          
+          if(ps2_is_e0(prevhid[i])) ps2_send(0xe0);
           ps2_send(0xf0);
           ps2_send(hid2ps2[prevhid[i]]);
         }
@@ -274,17 +289,17 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
         }
         
         if(make) {
-          repeat = report[i];
-          if(alarm) cancel_alarm(alarm);
-          alarm = add_alarm_in_ms(DELAYMS, repeat_callback, NULL, false);
-          
-          if(report[i] == 0x46 ||
-            (report[i] >= 0x48 && report[i] <= 0x52) ||
-             report[i] == 0x54 || report[i] == 0x58 ||
-             report[i] == 0x65 || report[i] == 0x66) {
-            ps2_send(0xe0);
+          if(report[i] == 0x48) {
+            ps2_send(0xe1); ps2_send(0x14); ps2_send(0x77); ps2_send(0xe1);
+            ps2_send(0xf0); ps2_send(0x14); ps2_send(0xf0); ps2_send(0x77);
+            continue;
           }
           
+          repeat = report[i];
+          if(repeater) cancel_alarm(repeater);
+          repeater = add_alarm_in_ms(delayms, repeat_callback, NULL, false);
+          
+          if(ps2_is_e0(report[i])) ps2_send(0xe0);
           ps2_send(hid2ps2[report[i]]);
         }
       }
