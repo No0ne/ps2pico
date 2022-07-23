@@ -9,24 +9,26 @@ WORK-IN-PROGRESS
 # Usage
 * Copy `ps2pico.uf2` to your Pi Pico by pressing BOOTSEL before pluggging in.
 * Afterwards connect a USB keyboard using an OTG-adapter and PS/2 5V to Pico VBUS.
-* 3.3V/5V conversion is done with two NPN transistors and six resistors as shown below:
+* 3.3V/5V conversion is done with two NPN transistors, two zener diodes and four resistors as shown below:
 ```
-                   PS/2 CLOCK      ____
-                       |__________|2k2 |__________ GPIO 14
-            ____       |          |____|   __|__
-GPIO 15 ___|2k2 |____|/   BC547            |3k3|
-           |____|    |\e                   |___|
+                   PS/2 CLOCK
+                       |           ____
+                       |__________|2k2 |___________ GPIO 14
+            ____       |          |____|     |
+GPIO 15 ___|2k2 |____|/  BC547             __|__
+           |____|    |\e                    / \  3V6
                        |                     |
-                  _____|__GND________________|____
+                   ____|__GND________________|___
 
 
-                   PS/2 DATA      ____
-                       |_________|2k2 |___________ GPIO 17
-            ____       |         |____|    __|__
-GPIO 16 ___|2k2 |____|/   BC547            |3k3|
-           |____|    |\e                   |___|
+                   PS/2 DATA
+                       |          ____
+                       |_________|2k2 |____________ GPIO 17
+            ____       |         |____|      |
+GPIO 16 ___|2k2 |____|/  BC547             __|__
+           |____|    |\e                    / \  3V6
                        |                     |
-                  _____|__GND________________|____
+                   ____|__GND________________|___
 ```
 
 # Build
