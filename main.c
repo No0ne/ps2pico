@@ -24,6 +24,7 @@ uint8_t kbd_inst;
 
 uint8_t prevhid[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 uint8_t prevps2 = 0;
+uint8_t lastps2 = 0;
 uint8_t const mod2ps2[] = { 0x14, 0x12, 0x11, 0x1f, 0x14, 0x59, 0x11, 0x27 };
 uint8_t const hid2ps2[] = {
   0x00, 0x00, 0xfc, 0x00, 0x1c, 0x32, 0x21, 0x23, 0x24, 0x2b, 0x34, 0x33, 0x43, 0x3b, 0x42, 0x4b,
@@ -49,6 +50,7 @@ bool ps2_send(uint8_t data) {
   if(!gpio_get(CLKIN)) return false;
   if(!gpio_get(DTIN)) return false;
   
+  lastps2 = data;
   uint8_t parity = 1;
   sending = true;
   
@@ -127,6 +129,22 @@ void ps2_receive() {
       
     } else if(received == 0xee) {
       ps2_send(0xee);
+      return;
+      
+    } else if(received == 0xfe) {
+      ps2_send(lastps2);
+      return;
+      
+    } else if(received == 0xf4) {
+      // enable
+      return;
+      
+    } else if(received == 0xf5) {
+      // disable
+      return;
+      
+    } else if(received == 0xf6) {
+      // defaults
       return;
       
     } else if(received == 0xf2) {
