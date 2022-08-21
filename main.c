@@ -18,6 +18,8 @@ uint8_t repeat = 0;
 bool repeating = false;
 bool receiving = false;
 bool sending = false;
+bool enabled = true;
+bool blink = false;
 
 uint8_t kbd_addr;
 uint8_t kbd_inst;
@@ -36,6 +38,16 @@ uint8_t const hid2ps2[] = {
   0x75, 0x7d, 0x70, 0x71, 0x61, 0x2f, 0x37, 0x0f, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38, 0x40,
   0x48, 0x50, 0x57, 0x5f
 };
+
+int64_t blink_callback(alarm_id_t id, void *user_data) {
+  if(blink) {
+    blink = false;
+    add_alarm_in_ms(1000, blink_callback, NULL, false);
+    uint8_t static value = 7; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
+  } else {
+    uint8_t static value = 0; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
+  }
+}
 
 bool ps2_is_e0(uint8_t data) {
   return data == 0x46 ||
@@ -125,6 +137,9 @@ void ps2_receive() {
     
     if(received == 0xff) {
       while(!ps2_send(0xaa));
+      enabled = true;
+      blink = true;
+      add_alarm_in_ms(100, blink_callback, NULL, false);
       return;
       
     } else if(received == 0xee) {
@@ -136,15 +151,14 @@ void ps2_receive() {
       return;
       
     } else if(received == 0xf4) {
-      // enable
+      enabled = true;
       return;
       
-    } else if(received == 0xf5) {
-      // disable
-      return;
-      
-    } else if(received == 0xf6) {
-      // defaults
+    } else if(received == 0xf5 || received == 0xf6) {
+      enabled = received == 0xf6;
+      repeatus = 35000;
+      delayms = 250;
+      uint8_t static value = 0; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
       return;
       
     } else if(received == 0xf2) {
@@ -240,11 +254,13 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_re
   kbd_addr = dev_addr;
   kbd_inst = instance;
   tuh_hid_receive_report(dev_addr, instance);
+  blink = true;
+  add_alarm_in_ms(100, blink_callback, NULL, false);
 }
 
 void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* report, uint16_t len) {
 
-  if(tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_KEYBOARD) {
+  if(enabled && tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_KEYBOARD) {
     board_led_write(1);
     
     kbd_addr = dev_addr;
