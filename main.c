@@ -150,22 +150,20 @@ void ps2_receive() {
       ps2_send(lastps2);
       return;
       
+    } else if(received == 0xf2) {
+      ps2_send(0xfa);
+      ps2_send(0xab);
+      ps2_send(0x83);
+      return;
+      
     } else if(received == 0xf4) {
       enabled = true;
-      return;
       
     } else if(received == 0xf5 || received == 0xf6) {
       enabled = received == 0xf6;
       repeatus = 35000;
       delayms = 250;
       uint8_t static value = 0; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
-      return;
-      
-    } else if(received == 0xf2) {
-      ps2_send(0xfa);
-      ps2_send(0xab);
-      ps2_send(0x83);
-      return;
     }
     
     if(prevps2 == 0xf3) {
