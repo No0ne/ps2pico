@@ -4,6 +4,8 @@ USB keyboard to PS/2 interface converter using a Raspberry Pi Pico
 |![Release Candidate 0](https://raw.githubusercontent.com/No0ne/ps2pico/main/rc0.jpg) |![Release Candidate 1](https://raw.githubusercontent.com/No0ne/ps2pico/main/rc1.jpg)|
 |-|-|
 
+Keyboard + Mouse variant: https://github.com/No0ne/ps2x2pico
+
 # Usage
 * Copy `ps2pico.uf2` to your Pi Pico by pressing BOOTSEL before pluggging in.
 * Afterwards connect a USB keyboard using an OTG-adapter and PS/2 5V to Pico VBUS.
