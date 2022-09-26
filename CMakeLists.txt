@@ -11,10 +11,10 @@ project(ps2pico C CXX ASM)
 # Initialize the Raspberry Pi Pico SDK
 pico_sdk_init()
 
-add_executable(ps2pico main.c)
+add_executable(ps2pico ps2pico.c)
 
 pico_set_program_name(ps2pico "ps2pico")
-pico_set_program_version(ps2pico "0.3")
+pico_set_program_version(ps2pico "0.4")
 
 target_include_directories(ps2pico PUBLIC ${CMAKE_CURRENT_LIST_DIR})
 target_link_libraries(ps2pico pico_stdlib tinyusb_host tinyusb_board)
