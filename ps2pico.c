@@ -156,13 +156,13 @@ void ps2_receive() {
   irq_enabled = false;
   board_led_write(1);
   
-  uint16_t bit = 1;
+  uint8_t bit = 1;
   uint8_t data = 0;
   uint8_t parity = 1;
   
   ps2_cycle_clock();
   
-  while(bit < 0x100) {
+  while(bit) {
     if(gpio_get(DTIN)) {
       data = data | bit;
       parity = parity ^ 1;
@@ -263,7 +263,6 @@ void ps2_receive() {
 }
 
 void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_report, uint16_t desc_len) {
-  
   if(tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_KEYBOARD) {
     kbd_addr = dev_addr;
     kbd_inst = instance;
@@ -273,7 +272,6 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_re
     
     tuh_hid_receive_report(dev_addr, instance);
   }
-  
 }
 
 void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
