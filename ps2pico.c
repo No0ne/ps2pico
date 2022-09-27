@@ -1,3 +1,28 @@
+/*
+ * The MIT License (MIT)
+ *
+ * Copyright (c) 2022 No0ne (https://github.com/No0ne)
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ */
+
 #include "hardware/gpio.h"
 #include "bsp/board.h"
 #include "tusb.h"
@@ -18,21 +43,14 @@ uint8_t const hid2ps2[] = {
   0x75, 0x7d, 0x70, 0x71, 0x61, 0x2f, 0x37, 0x0f, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38, 0x40,
   0x48, 0x50, 0x57, 0x5f
 };
-
-// 1 81, 1 82, 1 83
-// 0x37, 0x3f, 0x5e
-// 00b5, 00b6, 00b7, 00cd, 00e2
-// 0x4d, 0x15, 0x3b, 0x34, 0x23
-// 00e9, 00ea
-// 0x32, 0x21
-// 0183, 018a, 0192, 0194, 0221, 0223, 0224, 0225, 0226, 0227, 022a
-// 0x50, 0x48, 0x2b, 0x40, 0x10, 0x3a, 0x38, 0x30, 0x28, 0x20, 0x18
+uint8_t const maparray = sizeof(hid2ps2) / sizeof(uint8_t);
 
 bool irq_enabled = true;
 bool kbd_enabled = true;
 uint8_t kbd_addr = 0;
 uint8_t kbd_inst = 0;
 
+bool blinking = false;
 bool receiving = false;
 bool repeating = false;
 uint32_t repeat_us = 35000;
@@ -43,21 +61,6 @@ uint8_t prev_rpt[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 uint8_t prev_ps2 = 0;
 uint8_t resend = 0;
 uint8_t repeat = 0;
-
-bool blink = false;
-int64_t blink_callback(alarm_id_t id, void *user_data) {
-  if(kbd_addr) {
-    if(blink) {
-      uint8_t static value = 7; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
-      blink = false;
-      return 500000;
-    } else {
-      uint8_t static value = 0; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
-    }
-  }
-  
-  return 0;
-}
 
 int64_t repeat_callback(alarm_id_t id, void *user_data) {
   if(repeat) {
@@ -82,29 +85,35 @@ void ps2_set_bit(bool bt) {
   ps2_cycle_clock();
 }
 
-bool ps2_send(uint8_t data) {
-  sleep_us(1000);
+void ps2_send(uint8_t data) {
+  uint8_t timeout = 100;
   
-  if(!gpio_get(CLKIN)) return false;
-  if(!gpio_get(DTIN)) return false;
-  
-  resend = data;
-  uint8_t parity = 1;
-  irq_enabled = false;
-  
-  ps2_set_bit(0);
-  
-  for(uint8_t i = 0; i < 8; i++) {
-    ps2_set_bit(data & 0x01);
-    parity = parity ^ (data & 0x01);
-    data = data >> 1;
+  while(timeout) {
+    if(gpio_get(CLKIN) && gpio_get(DTIN)) {
+      
+      resend = data;
+      uint8_t parity = 1;
+      irq_enabled = false;
+      
+      ps2_set_bit(0);
+      
+      for(uint8_t i = 0; i < 8; i++) {
+        ps2_set_bit(data & 0x01);
+        parity = parity ^ (data & 0x01);
+        data = data >> 1;
+      }
+      
+      ps2_set_bit(parity);
+      ps2_set_bit(1);
+      
+      irq_enabled = true;
+      return;
+      
+    }
+    
+    timeout--;
+    sleep_ms(1);
   }
-  
-  ps2_set_bit(parity);
-  ps2_set_bit(1);
-  
-  irq_enabled = true;
-  return true;
 }
 
 void maybe_send_e0(uint8_t data) {
@@ -115,6 +124,32 @@ void maybe_send_e0(uint8_t data) {
      data >= 0x81) {
     ps2_send(0xe0);
   }
+}
+
+void kbd_set_leds(uint8_t data) {
+  // https://github.com/hathach/tinyusb/discussions/1191
+  // don't know how to use this properly, full example needed
+  if(data == 1) { uint8_t static value = 4; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1); } else
+  if(data == 2) { uint8_t static value = 1; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1); } else
+  if(data == 3) { uint8_t static value = 5; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1); } else
+  if(data == 4) { uint8_t static value = 2; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1); } else
+  if(data == 5) { uint8_t static value = 6; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1); } else
+  if(data == 6) { uint8_t static value = 3; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1); } else
+  if(data == 7) { uint8_t static value = 7; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1); } else
+                { uint8_t static value = 0; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1); }
+}
+
+int64_t blink_callback(alarm_id_t id, void *user_data) {
+  if(kbd_addr) {
+    if(blinking) {
+      kbd_set_leds(7);
+      blinking = false;
+      return 500000;
+    } else {
+      kbd_set_leds(0);
+    }
+  }
+  return 0;
 }
 
 void ps2_receive() {
@@ -154,6 +189,11 @@ void ps2_receive() {
   }
   
   switch(prev_ps2) {
+    case 0xed:
+      prev_ps2 = 0;
+      kbd_set_leds(data);
+    break;
+    
     case 0xf3:
       prev_ps2 = 0;
       repeat_us = data & 0x1f;
@@ -167,28 +207,16 @@ void ps2_receive() {
       if(delay_ms == 0x60) delay_ms = 1000;
     break;
     
-    case 0xed:
-      prev_ps2 = 0;
-      if(data == 1) { uint8_t static value = 4; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1); } else
-      if(data == 2) { uint8_t static value = 1; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1); } else
-      if(data == 3) { uint8_t static value = 5; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1); } else
-      if(data == 4) { uint8_t static value = 2; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1); } else
-      if(data == 5) { uint8_t static value = 6; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1); } else
-      if(data == 6) { uint8_t static value = 3; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1); } else
-      if(data == 7) { uint8_t static value = 7; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1); } else
-                    { uint8_t static value = 0; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1); }
-    break;
-    
     default:
       switch(data) {
         case 0xff:
           ps2_send(0xfa);
           
           kbd_enabled = true;
-          blink = true;
+          blinking = true;
           add_alarm_in_ms(1, blink_callback, NULL, false);
           
-          sleep_us(5000);
+          sleep_ms(10);
           ps2_send(0xaa);
           
           return;
@@ -225,7 +253,7 @@ void ps2_receive() {
           kbd_enabled = data == 0xf6;
           repeat_us = 35000;
           delay_ms = 250;
-          uint8_t static value = 0; tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, (void*)&value, 1);
+          kbd_set_leds(0);
         break;
       }
     break;
@@ -240,7 +268,7 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_re
     kbd_addr = dev_addr;
     kbd_inst = instance;
     
-    blink = true;
+    blinking = true;
     add_alarm_in_ms(1, blink_callback, NULL, false);
     
     tuh_hid_receive_report(dev_addr, instance);
@@ -258,7 +286,7 @@ void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
 void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* report, uint16_t len) {
   if(dev_addr == kbd_addr && instance == kbd_inst) {
     
-    if(!kbd_enabled) {
+    if(!kbd_enabled || report[1] != 0) {
       tuh_hid_receive_report(dev_addr, instance);
       return;
     }
@@ -301,7 +329,7 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
           }
         }
         
-        if(brk) {
+        if(brk && report[i] < maparray) {
           if(prev_rpt[i] == 0x48) continue;
           repeat = 0;
           
@@ -321,7 +349,7 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
           }
         }
         
-        if(make) {
+        if(make && report[i] < maparray) {
           if(report[i] == 0x48) {
             
             if(report[0] & 0x1 || report[0] & 0x10) {
