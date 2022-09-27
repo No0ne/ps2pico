@@ -80,8 +80,8 @@ void ps2_cycle_clock() {
   sleep_us(20);
 }
 
-void ps2_set_bit(bool bt) {
-  gpio_put(DTOUT, !bt);
+void ps2_set_bit(bool bit) {
+  gpio_put(DTOUT, !bit);
   ps2_cycle_clock();
 }
 
@@ -373,8 +373,8 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
       prev_rpt[i] = report[i];
     }
     
-    board_led_write(0);
     tuh_hid_receive_report(dev_addr, instance);
+    board_led_write(0);
     
   }
 }
