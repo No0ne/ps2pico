@@ -86,7 +86,8 @@ void ps2_set_bit(bool bt) {
 }
 
 void ps2_send(uint8_t data) {
-  uint8_t timeout = 100;
+  uint8_t timeout = 10;
+  if(!gpio_get(CLKIN)) sleep_ms(1);
   
   while(timeout) {
     if(gpio_get(CLKIN) && gpio_get(DTIN)) {
@@ -112,7 +113,7 @@ void ps2_send(uint8_t data) {
     }
     
     timeout--;
-    sleep_ms(1);
+    sleep_ms(8);
   }
 }
 
@@ -216,7 +217,7 @@ void ps2_receive() {
           blinking = true;
           add_alarm_in_ms(1, blink_callback, NULL, false);
           
-          sleep_ms(10);
+          sleep_ms(16);
           ps2_send(0xaa);
           
           return;
@@ -329,7 +330,7 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
         
         if(brk && report[i] < maparray) {
           if(prev_rpt[i] == 0x48) continue;
-          repeat = 0;
+          if(prev_rpt[i] == repeat) repeat = 0;
           
           maybe_send_e0(prev_rpt[i]);
           ps2_send(0xf0);
