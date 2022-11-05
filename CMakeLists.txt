@@ -14,7 +14,7 @@ pico_sdk_init()
 add_executable(ps2pico ps2pico.c)
 
 pico_set_program_name(ps2pico "ps2pico")
-pico_set_program_version(ps2pico "0.5")
+pico_set_program_version(ps2pico "0.6")
 
 target_include_directories(ps2pico PUBLIC ${CMAKE_CURRENT_LIST_DIR})
 target_link_libraries(ps2pico pico_stdlib tinyusb_host tinyusb_board)
