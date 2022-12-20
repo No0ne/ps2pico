@@ -116,6 +116,7 @@ int64_t blink_callback(alarm_id_t id, void *user_data) {
       return 500000;
     } else {
       kbd_set_leds(0);
+      ps2_send(0xaa);
     }
   }
   return 0;
@@ -165,7 +166,6 @@ void ps2_receive(uint32_t fifo) {
           pio_sm_clear_fifos(pio, sm);
           pio_sm_drain_tx_fifo(pio, sm);
           ps2_send(0xfa);
-          ps2_send(0xaa);
         return;
         
         case 0xfe: // CMD: Resend
@@ -213,7 +213,6 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_re
     blinking = true;
     add_alarm_in_ms(1, blink_callback, NULL, false);
     
-    ps2_send(0xaa);
     tuh_hid_receive_report(dev_addr, instance);
   }
 }
