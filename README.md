@@ -33,6 +33,7 @@ GPIO 16 ___|2k2 |____|/  BC547             __|__
 ```
 
 # Build
+make sure Pico SDK is on `develop` branch
 ```
 export PICO_SDK_PATH=/path/to/pico-sdk
 mkdir build
