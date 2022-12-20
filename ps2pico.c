@@ -23,14 +23,15 @@
  *
  */
 
+#include "ps2device.pio.h"
 #include "hardware/gpio.h"
 #include "bsp/board.h"
 #include "tusb.h"
 
 #define CLKIN  14
 #define CLKOUT 15
-#define DTIN   17
-#define DTOUT  16
+#define DATIN  17
+#define DATOUT 16
 
 uint8_t const led2ps2[] = { 0, 4, 1, 5, 2, 6, 3, 7 };
 uint8_t const mod2ps2[] = { 0x14, 0x12, 0x11, 0x1f, 0x14, 0x59, 0x11, 0x27 };
@@ -46,13 +47,15 @@ uint8_t const hid2ps2[] = {
 };
 uint8_t const maparray = sizeof(hid2ps2) / sizeof(uint8_t);
 
-bool irq_enabled = true;
+PIO pio = pio0;
+uint sm;
+uint offset;
+
 bool kbd_enabled = true;
 uint8_t kbd_addr = 0;
 uint8_t kbd_inst = 0;
 
 bool blinking = false;
-bool receiving = false;
 bool repeating = false;
 uint32_t repeat_us = 35000;
 uint16_t delay_ms = 250;
@@ -74,49 +77,19 @@ int64_t repeat_callback(alarm_id_t id, void *user_data) {
   return 0;
 }
 
-void ps2_cycle_clock() {
-  sleep_us(20);
-  gpio_put(CLKOUT, !0);
-  sleep_us(40);
-  gpio_put(CLKOUT, !1);
-  sleep_us(20);
-}
-
-void ps2_set_bit(bool bit) {
-  gpio_put(DTOUT, !bit);
-  ps2_cycle_clock();
+uint16_t ps2_frame(uint8_t data) {
+  uint8_t parity = 1;
+  for(uint8_t i = 0; i < 8; i++) {
+    parity = parity ^ (data >> i & 1);
+  }
+  
+  return ((1 << 10) | (parity << 9) | (data << 1)) ^ 0x7ff;
 }
 
 void ps2_send(uint8_t data) {
-  uint8_t timeout = 10;
-  sleep_ms(1);
-  
-  while(timeout) {
-    if(gpio_get(CLKIN) && gpio_get(DTIN)) {
-      
-      resend = data;
-      uint8_t parity = 1;
-      irq_enabled = false;
-      
-      ps2_set_bit(0);
-      
-      for(uint8_t i = 0; i < 8; i++) {
-        ps2_set_bit(data & 0x01);
-        parity = parity ^ (data & 0x01);
-        data = data >> 1;
-      }
-      
-      ps2_set_bit(parity);
-      ps2_set_bit(1);
-      
-      irq_enabled = true;
-      return;
-      
-    }
-    
-    timeout--;
-    sleep_ms(8);
-  }
+  // uint8_t timeout = 10;
+  resend = data;
+  pio_sm_put(pio, sm, ps2_frame(data));
 }
 
 void maybe_send_e0(uint8_t data) {
@@ -148,49 +121,28 @@ int64_t blink_callback(alarm_id_t id, void *user_data) {
   return 0;
 }
 
-void ps2_receive() {
-  irq_enabled = false;
-  board_led_write(1);
+void ps2_receive(uint32_t fifo) {
+  fifo = fifo >> 23;
   
-  uint8_t bit = 1;
-  uint8_t data = 0;
   uint8_t parity = 1;
-  
-  ps2_cycle_clock();
-  
-  while(bit) {
-    if(gpio_get(DTIN)) {
-      data = data | bit;
-      parity = parity ^ 1;
-    } else {
-      parity = parity ^ 0;
-    }
-    
-    bit = bit << 1;
-    ps2_cycle_clock();
+  for(uint8_t i = 0; i < 8; i++) {
+    parity = parity ^ (fifo >> i & 1);
   }
   
-  parity = gpio_get(DTIN) == parity;
-  ps2_cycle_clock();
-  
-  ps2_set_bit(0);
-  gpio_put(DTOUT, !1);
-  
-  irq_enabled = true;
-  board_led_write(0);
-  
-  if(!parity) {
+  if(parity != fifo & 0x100) {
     ps2_send(0xfe);
     return;
   }
   
+  uint8_t data = fifo;
+  
   switch(prev_ps2) {
-    case 0xed:
+    case 0xed: // CMD: Set LEDs
       prev_ps2 = 0;
       kbd_set_leds(data);
     break;
     
-    case 0xf3:
+    case 0xf3: // CMD: Set typematic rate and delay
       prev_ps2 = 0;
       repeat_us = data & 0x1f;
       delay_ms = data & 0x60;
@@ -205,47 +157,42 @@ void ps2_receive() {
     
     default:
       switch(data) {
-        case 0xff:
-          ps2_send(0xfa);
-          
+        case 0xff: // CMD: Reset
           kbd_enabled = true;
           blinking = true;
           add_alarm_in_ms(1, blink_callback, NULL, false);
           
-          sleep_ms(16);
+          pio_sm_clear_fifos(pio, sm);
+          pio_sm_drain_tx_fifo(pio, sm);
+          ps2_send(0xfa);
           ps2_send(0xaa);
-          
-          return;
-        break;
+        return;
         
-        case 0xfe:
+        case 0xfe: // CMD: Resend
           ps2_send(resend);
-          return;
-        break;
+        return;
         
-        case 0xee:
+        case 0xee: // CMD: Echo
           ps2_send(0xee);
-          return;
-        break;
+        return;
         
-        case 0xf2:
+        case 0xf2: // CMD: Identify keyboard
           ps2_send(0xfa);
           ps2_send(0xab);
           ps2_send(0x83);
-          return;
-        break;
+        return;
         
-        case 0xf3:
-        case 0xed:
+        case 0xf3: // CMD: Set typematic rate and delay
+        case 0xed: // CMD: Set LEDs
           prev_ps2 = data;
         break;
         
-        case 0xf4:
+        case 0xf4: // CMD: Enable scanning
           kbd_enabled = true;
         break;
         
-        case 0xf5:
-        case 0xf6:
+        case 0xf5: // CMD: Disable scanning, restore default parameters
+        case 0xf6: // CMD: Set default parameters
           kbd_enabled = data == 0xf6;
           repeat_us = 35000;
           delay_ms = 250;
@@ -266,6 +213,7 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_re
     blinking = true;
     add_alarm_in_ms(1, blink_callback, NULL, false);
     
+    ps2_send(0xaa);
     tuh_hid_receive_report(dev_addr, instance);
   }
 }
@@ -375,24 +323,19 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
 }
 
 void irq_callback(uint gpio, uint32_t events) {
-  if(irq_enabled && !gpio_get(DTIN)) {
-    receiving = true;
+  if(!gpio_get(DATIN) && !pio_interrupt_get(pio, 0)) {
+    board_led_write(1);
+    pio_sm_drain_tx_fifo(pio, sm);
+    pio_sm_exec(pio, sm, pio_encode_jmp(offset + 2));
   }
 }
 
 void main() {
   board_init();
   
-  gpio_init(CLKOUT);
-  gpio_init(DTOUT);
-  gpio_init(CLKIN);
-  gpio_init(DTIN);
-  gpio_set_dir(CLKOUT, GPIO_OUT);
-  gpio_set_dir(DTOUT, GPIO_OUT);
-  gpio_set_dir(CLKIN, GPIO_IN);
-  gpio_set_dir(DTIN, GPIO_IN);
-  gpio_put(CLKOUT, !1);
-  gpio_put(DTOUT, !1);
+  sm = pio_claim_unused_sm(pio, true);
+  offset = pio_add_program(pio, &ps2dev_program);
+  ps2dev_program_init(pio, sm, offset, CLKIN, CLKOUT, DATIN, DATOUT);
   
   gpio_set_irq_enabled_with_callback(CLKIN, GPIO_IRQ_EDGE_RISE, true, &irq_callback);
   tusb_init();
@@ -400,9 +343,9 @@ void main() {
   while(true) {
     tuh_task();
     
-    if(receiving) {
-      receiving = false;
-      ps2_receive();
+    if(!pio_sm_is_rx_fifo_empty(pio, sm)) {
+      ps2_receive(pio_sm_get(pio, sm));
+      board_led_write(0);
     }
     
     if(repeating) {

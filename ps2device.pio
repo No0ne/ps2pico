@@ -1,0 +1,74 @@
+;
+; Copyright (c) 2022 No0ne (https://github.com/No0ne)
+;
+; SPDX-License-Identifier: MIT
+;
+
+.program ps2dev
+.side_set 1 opt
+
+start:
+  jmp !osre sendrequest
+  jmp start
+
+receive:
+  irq set 0
+  set pins, 1
+  set x, 8
+
+receiveloop:
+  set pins, 0
+  in pins, 1
+  set pins, 1
+  jmp x-- receiveloop
+  set pins, 0
+  nop side 1
+  set pins, 1 [1]
+  set pins, 0
+  irq clear 0 side 0
+  jmp start
+
+sendrequest:
+  set x, 10
+  set y, 16
+
+sendcheck:
+  jmp pin senddelay
+  jmp start
+
+senddelay:
+  jmp y-- sendcheck
+  irq set 0
+
+sendloop:
+  set pins, 0
+  out pins, 1
+  set pins, 1
+  jmp x-- sendloop
+  set pins, 0
+  irq clear 0
+  jmp start
+
+% c-sdk {
+
+  void ps2dev_program_init(PIO pio, uint sm, uint offset, uint clkin, uint clkout, uint datin, uint datout) {
+    pio_sm_config c = ps2dev_program_get_default_config(offset);
+    
+    pio_gpio_init(pio, clkout);
+    pio_gpio_init(pio, datout);
+    
+    sm_config_set_clkdiv(&c, 2560);
+    sm_config_set_jmp_pin(&c, clkin);
+    sm_config_set_set_pins(&c, clkout, 1);
+    sm_config_set_sideset_pins(&c, datout);
+    sm_config_set_out_pins(&c, datout, 1);
+    sm_config_set_out_shift(&c, true, true, 11);
+    sm_config_set_in_pins(&c, datin);
+    sm_config_set_in_shift(&c, true, true, 9);
+    
+    pio_sm_set_consecutive_pindirs(pio, sm, clkout, 2, true);
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+  }
+
+%}
