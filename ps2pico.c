@@ -28,21 +28,21 @@
 #include "tusb.h"
 
 #define CLKIN  14
-#define CLKOUT 15
+#define CLKOUT 12
 #define DTIN   17
-#define DTOUT  16
+#define DTOUT  11
 
 uint8_t const led2ps2[] = { 0, 4, 1, 5, 2, 6, 3, 7 };
-uint8_t const mod2ps2[] = { 0x14, 0x12, 0x11, 0x1f, 0x14, 0x59, 0x11, 0x27 };
+uint8_t const mod2ps2[] = { 0x1d, 0x2a, 0x38, 0x5b, 0x1d, 0x36, 0x38, 0x5c };
 uint8_t const hid2ps2[] = {
-  0x00, 0x00, 0xfc, 0x00, 0x1c, 0x32, 0x21, 0x23, 0x24, 0x2b, 0x34, 0x33, 0x43, 0x3b, 0x42, 0x4b,
-  0x3a, 0x31, 0x44, 0x4d, 0x15, 0x2d, 0x1b, 0x2c, 0x3c, 0x2a, 0x1d, 0x22, 0x35, 0x1a, 0x16, 0x1e,
-  0x26, 0x25, 0x2e, 0x36, 0x3d, 0x3e, 0x46, 0x45, 0x5a, 0x76, 0x66, 0x0d, 0x29, 0x4e, 0x55, 0x54,
-  0x5b, 0x5d, 0x5d, 0x4c, 0x52, 0x0e, 0x41, 0x49, 0x4a, 0x58, 0x05, 0x06, 0x04, 0x0c, 0x03, 0x0b,
-  0x83, 0x0a, 0x01, 0x09, 0x78, 0x07, 0x7c, 0x7e, 0x7e, 0x70, 0x6c, 0x7d, 0x71, 0x69, 0x7a, 0x74,
-  0x6b, 0x72, 0x75, 0x77, 0x4a, 0x7c, 0x7b, 0x79, 0x5a, 0x69, 0x72, 0x7a, 0x6b, 0x73, 0x74, 0x6c,
-  0x75, 0x7d, 0x70, 0x71, 0x61, 0x2f, 0x37, 0x0f, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38, 0x40,
-  0x48, 0x50, 0x57, 0x5f
+  0x00, 0xff, 0xfc, 0x00, 0x1e, 0x30, 0x2e, 0x20, 0x12, 0x21, 0x22, 0x23, 0x17, 0x24, 0x25, 0x26,
+  0x32, 0x31, 0x18, 0x19, 0x10, 0x13, 0x1f, 0x14, 0x16, 0x2f, 0x11, 0x2d, 0x15, 0x2c, 0x02, 0x03,
+  0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x1c, 0x01, 0x0e, 0x0f, 0x39, 0x0c, 0x0d, 0x1a,
+  0x1b, 0x2b, 0x2b, 0x27, 0x28, 0x29, 0x33, 0x34, 0x35, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x40,
+  0x41, 0x42, 0x43, 0x44, 0x57, 0x58, 0x37, 0x46, 0x46, 0x52, 0x47, 0x49, 0x53, 0x4f, 0x51, 0x4d,
+  0x4b, 0x50, 0x48, 0x45, 0x35, 0x37, 0x4a, 0x4e, 0x1c, 0x4f, 0x50, 0x51, 0x4b, 0x4c, 0x4d, 0x47,
+  0x48, 0x49, 0x52, 0x53, 0x56, 0x5d, 0x5e, 0x59, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b,
+  0x6c, 0x6d, 0x6e, 0x76
 };
 uint8_t const maparray = sizeof(hid2ps2) / sizeof(uint8_t);
 
@@ -75,56 +75,60 @@ int64_t repeat_callback(alarm_id_t id, void *user_data) {
 }
 
 void ps2_cycle_clock() {
-  sleep_us(20);
-  gpio_put(CLKOUT, !0);
-  sleep_us(40);
-  gpio_put(CLKOUT, !1);
-  sleep_us(20);
+  sleep_us(8);
+  gpio_put(CLKOUT, 1);
+  sleep_us(63);
+  gpio_put(CLKOUT, 0);
+  sleep_us(22);
 }
 
 void ps2_set_bit(bool bit) {
-  gpio_put(DTOUT, !bit);
+  gpio_put(DTOUT, bit);
   ps2_cycle_clock();
 }
 
 void ps2_send(uint8_t data) {
-  uint8_t timeout = 10;
+  /*uint8_t timeout = 10;
   sleep_ms(1);
   
   while(timeout) {
-    if(gpio_get(CLKIN) && gpio_get(DTIN)) {
+    if(gpio_get(CLKIN) && gpio_get(DTIN)) {*/
       
       resend = data;
       uint8_t parity = 1;
       irq_enabled = false;
       
-      ps2_set_bit(0);
+      gpio_put(DTOUT, 0); sleep_us(5);
+      gpio_put(CLKOUT, 0); sleep_us(5);
+      gpio_put(DTOUT, 1); sleep_us(110);
+      ps2_cycle_clock();
       
       for(uint8_t i = 0; i < 8; i++) {
         ps2_set_bit(data & 0x01);
-        parity = parity ^ (data & 0x01);
         data = data >> 1;
       }
       
-      ps2_set_bit(parity);
-      ps2_set_bit(1);
+      //ps2_set_bit(1);
+      
+      gpio_put(CLKOUT, 1);
+      gpio_put(DTOUT, 1);
+      sleep_ms(1);
       
       irq_enabled = true;
       return;
       
-    }
+  /*  }
     
     timeout--;
     sleep_ms(8);
-  }
+  }*/
 }
 
 void maybe_send_e0(uint8_t data) {
   if(data == 0x46 ||
      data >= 0x48 && data <= 0x52 ||
      data == 0x54 || data == 0x58 ||
-     data == 0x65 || data == 0x66 ||
-     data >= 0x81) {
+     data == 0x65 || data == 0x66) {
     ps2_send(0xe0);
   }
 }
@@ -148,115 +152,6 @@ int64_t blink_callback(alarm_id_t id, void *user_data) {
   return 0;
 }
 
-void ps2_receive() {
-  irq_enabled = false;
-  board_led_write(1);
-  
-  uint8_t bit = 1;
-  uint8_t data = 0;
-  uint8_t parity = 1;
-  
-  ps2_cycle_clock();
-  
-  while(bit) {
-    if(gpio_get(DTIN)) {
-      data = data | bit;
-      parity = parity ^ 1;
-    } else {
-      parity = parity ^ 0;
-    }
-    
-    bit = bit << 1;
-    ps2_cycle_clock();
-  }
-  
-  parity = gpio_get(DTIN) == parity;
-  ps2_cycle_clock();
-  
-  ps2_set_bit(0);
-  gpio_put(DTOUT, !1);
-  
-  irq_enabled = true;
-  board_led_write(0);
-  
-  if(!parity) {
-    ps2_send(0xfe);
-    return;
-  }
-  
-  switch(prev_ps2) {
-    case 0xed:
-      prev_ps2 = 0;
-      kbd_set_leds(data);
-    break;
-    
-    case 0xf3:
-      prev_ps2 = 0;
-      repeat_us = data & 0x1f;
-      delay_ms = data & 0x60;
-      
-      repeat_us = 35000 + repeat_us * 15000;
-      
-      if(delay_ms == 0x00) delay_ms = 250;
-      if(delay_ms == 0x20) delay_ms = 500;
-      if(delay_ms == 0x40) delay_ms = 750;
-      if(delay_ms == 0x60) delay_ms = 1000;
-    break;
-    
-    default:
-      switch(data) {
-        case 0xff:
-          ps2_send(0xfa);
-          
-          kbd_enabled = true;
-          blinking = true;
-          add_alarm_in_ms(1, blink_callback, NULL, false);
-          
-          sleep_ms(16);
-          ps2_send(0xaa);
-          
-          return;
-        break;
-        
-        case 0xfe:
-          ps2_send(resend);
-          return;
-        break;
-        
-        case 0xee:
-          ps2_send(0xee);
-          return;
-        break;
-        
-        case 0xf2:
-          ps2_send(0xfa);
-          ps2_send(0xab);
-          ps2_send(0x83);
-          return;
-        break;
-        
-        case 0xf3:
-        case 0xed:
-          prev_ps2 = data;
-        break;
-        
-        case 0xf4:
-          kbd_enabled = true;
-        break;
-        
-        case 0xf5:
-        case 0xf6:
-          kbd_enabled = data == 0xf6;
-          repeat_us = 35000;
-          delay_ms = 250;
-          kbd_set_leds(0);
-        break;
-      }
-    break;
-  }
-  
-  ps2_send(0xfa);
-}
 
 void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_report, uint16_t desc_len) {
   if(tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_KEYBOARD) {
@@ -299,8 +194,7 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
           if(rbits & 0x01) {
             ps2_send(mod2ps2[j]);
           } else {
-            ps2_send(0xf0);
-            ps2_send(mod2ps2[j]);
+            ps2_send(mod2ps2[j] ^ 0x80);
           }
         }
         
@@ -328,8 +222,7 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
           if(prev_rpt[i] == repeat) repeat = 0;
           
           maybe_send_e0(prev_rpt[i]);
-          ps2_send(0xf0);
-          ps2_send(hid2ps2[prev_rpt[i]]);
+          ps2_send(hid2ps2[prev_rpt[i]] ^ 0x80);
         }
       }
       
@@ -344,7 +237,7 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
         }
         
         if(make && report[i] < maparray) {
-          if(report[i] == 0x48) {
+          /*if(report[i] == 0x48) {
             
             if(report[0] & 0x1 || report[0] & 0x10) {
               ps2_send(0xe0); ps2_send(0x7e); ps2_send(0xe0); ps2_send(0xf0); ps2_send(0x7e);
@@ -354,7 +247,7 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
             }
             
             continue;
-          }
+          }*/
           
           repeat = report[i];
           if(repeater) cancel_alarm(repeater);
@@ -385,25 +278,24 @@ void main() {
   
   gpio_init(CLKOUT);
   gpio_init(DTOUT);
-  gpio_init(CLKIN);
-  gpio_init(DTIN);
+  //gpio_init(CLKIN);
+  //gpio_init(DTIN);
   gpio_set_dir(CLKOUT, GPIO_OUT);
   gpio_set_dir(DTOUT, GPIO_OUT);
-  gpio_set_dir(CLKIN, GPIO_IN);
-  gpio_set_dir(DTIN, GPIO_IN);
-  gpio_put(CLKOUT, !1);
-  gpio_put(DTOUT, !1);
+  //gpio_set_dir(CLKIN, GPIO_IN);
+  //gpio_set_dir(DTIN, GPIO_IN);
+  gpio_put(CLKOUT, 1);
+  gpio_put(DTOUT, 0);
   
-  gpio_set_irq_enabled_with_callback(CLKIN, GPIO_IRQ_EDGE_RISE, true, &irq_callback);
+  gpio_init(13);
+  gpio_set_dir(13, GPIO_OUT);
+  gpio_put(13, 1);
+  
+  //gpio_set_irq_enabled_with_callback(CLKIN, GPIO_IRQ_EDGE_RISE, true, &irq_callback);
   tusb_init();
   
   while(true) {
     tuh_task();
-    
-    if(receiving) {
-      receiving = false;
-      ps2_receive();
-    }
     
     if(repeating) {
       repeating = false;
