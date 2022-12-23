@@ -27,10 +27,10 @@
 #include "bsp/board.h"
 #include "tusb.h"
 
-//#define CLKIN  14
-#define CLKOUT 11
-#define DATOUT 12
-//#define DATIN  17
+#define CLKIN  14
+#define CLKOUT 15
+#define DATOUT 16
+#define DATIN  17
 
 uint8_t const mod2xt[] = { 0x1d, 0x2a, 0x38, 0x5b, 0x1d, 0x36, 0x38, 0x5c };
 uint8_t const hid2xt[] = {
@@ -45,8 +45,10 @@ uint8_t const hid2xt[] = {
 };
 uint8_t const maparray = sizeof(hid2xt) / sizeof(uint8_t);
 
+bool irq_enabled = true;
 bool blinking = false;
 bool repeating = false;
+bool resetting = false;
 uint32_t repeat_us = 40000;
 uint16_t delay_ms = 250;
 alarm_id_t repeater;
@@ -69,27 +71,28 @@ int64_t repeat_callback(alarm_id_t id, void *user_data) {
 
 void xt_cycle_clock() {
   sleep_us(8);
-  gpio_put(CLKOUT, 1);
+  gpio_put(CLKOUT, !1);
   sleep_us(63);
-  gpio_put(CLKOUT, 0);
+  gpio_put(CLKOUT, !0);
   sleep_us(22);
 }
 
 void xt_set_bit(bool bit) {
-  gpio_put(DATOUT, bit);
+  gpio_put(DATOUT, !bit);
   xt_cycle_clock();
 }
 
 void xt_send(uint8_t data) {
-  /*uint8_t timeout = 10;
-  sleep_ms(1);
+  uint8_t timeout = 10;
   
   while(timeout) {
-    if(gpio_get(CLKIN) && gpio_get(DATIN)) {*/
+    if(gpio_get(CLKIN) && gpio_get(DATIN)) {
       
-      gpio_put(DATOUT, 0); sleep_us(5);
-      gpio_put(CLKOUT, 0); sleep_us(5);
-      gpio_put(DATOUT, 1); sleep_us(110);
+      irq_enabled = false;
+      
+      gpio_put(DATOUT, !0); sleep_us(10);
+      gpio_put(CLKOUT, !0); sleep_us(5);
+      gpio_put(DATOUT, !1); sleep_us(110);
       xt_cycle_clock();
       
       for(uint8_t i = 0; i < 8; i++) {
@@ -97,17 +100,18 @@ void xt_send(uint8_t data) {
         data = data >> 1;
       }
       
-      gpio_put(CLKOUT, 1);
+      gpio_put(CLKOUT, !1);
       sleep_ms(1);
-      gpio_put(DATOUT, 1);
+      gpio_put(DATOUT, !1);
       
+      irq_enabled = true;
       return;
       
-  /*  }
+    }
     
     timeout--;
-    sleep_ms(8);
-  }*/
+    sleep_ms(10);
+  }
 }
 
 void maybe_send_e0(uint8_t data) {
@@ -138,11 +142,11 @@ int64_t blink_callback(alarm_id_t id, void *user_data) {
       return 500000;
     } else {
       kbd_set_leds(0);
+      resetting = true;
     }
   }
   return 0;
 }
-
 
 void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_report, uint16_t desc_len) {
   if(tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_KEYBOARD) {
@@ -263,24 +267,28 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
   }
 }
 
+void irq_callback(uint gpio, uint32_t events) {
+  if(irq_enabled && gpio_get(DATIN)) {
+    blinking = true;
+    add_alarm_in_ms(1, blink_callback, NULL, false);
+  }
+}
+
 void main() {
   board_init();
   
   gpio_init(CLKOUT);
   gpio_init(DATOUT);
-  //gpio_init(CLKIN);
-  //gpio_init(DATIN);
+  gpio_init(CLKIN);
+  gpio_init(DATIN);
   gpio_set_dir(CLKOUT, GPIO_OUT);
   gpio_set_dir(DATOUT, GPIO_OUT);
-  //gpio_set_dir(CLKIN, GPIO_IN);
-  //gpio_set_dir(DATIN, GPIO_IN);
-  gpio_put(CLKOUT, 1);
-  gpio_put(DATOUT, 1);
+  gpio_set_dir(CLKIN, GPIO_IN);
+  gpio_set_dir(DATIN, GPIO_IN);
+  gpio_put(CLKOUT, !1);
+  gpio_put(DATOUT, !1);
   
-  gpio_init(13);
-  gpio_set_dir(13, GPIO_OUT);
-  gpio_put(13, 1);
-  
+  gpio_set_irq_enabled_with_callback(CLKIN, GPIO_IRQ_EDGE_RISE, true, &irq_callback);
   tusb_init();
   
   while(true) {
@@ -293,6 +301,11 @@ void main() {
         maybe_send_e0(repeat);
         xt_send(hid2xt[repeat]);
       }
+    }
+    
+    if(resetting) {
+      resetting = false;
+      xt_send(0xaa);
     }
   }
 }
