@@ -130,7 +130,7 @@ void ps2_receive(uint32_t fifo) {
     parity = parity ^ (fifo >> i & 1);
   }
   
-  if(parity != fifo & 0x100) {
+  if(parity != fifo >> 8) {
     ps2_send(0xfe);
     return;
   }
