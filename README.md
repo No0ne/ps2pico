@@ -9,6 +9,7 @@ XT version: https://github.com/No0ne/ps2pico/tree/xt-version
 Keyboard + Mouse variant: https://github.com/No0ne/ps2x2pico
 
 # Usage
+* Download `ps2pico.uf2` from https://github.com/No0ne/ps2pico/releases
 * Copy `ps2pico.uf2` to your Pi Pico by pressing BOOTSEL before pluggging in.
 * Afterwards connect a USB keyboard using an OTG-adapter and PS/2 / AT 5V to Pico VBUS.
 * Also works with wireless keyboards with a dedicated USB receiver.
@@ -35,7 +36,6 @@ GPIO 16 ___|2k2 |____|/  BC547             __|__
 ```
 
 # Build
-make sure Pico SDK is on `develop` branch
 ```
 export PICO_SDK_PATH=/path/to/pico-sdk
 mkdir build

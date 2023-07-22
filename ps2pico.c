@@ -57,10 +57,12 @@ uint8_t kbd_inst = 0;
 
 bool blinking = false;
 bool repeating = false;
+bool repeatmod = false;
 uint32_t repeat_us = 35000;
 uint16_t delay_ms = 250;
 alarm_id_t repeater;
 
+uint8_t comp_rpt[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 uint8_t prev_rpt[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 uint8_t prev_ps2 = 0;
 uint8_t resend = 0;
@@ -87,14 +89,13 @@ uint16_t ps2_frame(uint8_t data) {
 }
 
 void ps2_send(uint8_t data) {
-  // uint8_t timeout = 10;
   resend = data;
   pio_sm_put(pio, sm, ps2_frame(data));
 }
 
 void maybe_send_e0(uint8_t data) {
   if(data == 0x46 ||
-     data >= 0x48 && data <= 0x52 ||
+     data >= 0x49 && data <= 0x52 ||
      data == 0x54 || data == 0x58 ||
      data == 0x65 || data == 0x66 ||
      data >= 0x81) {
@@ -160,6 +161,7 @@ void ps2_receive(uint32_t fifo) {
       switch(data) {
         case 0xff: // CMD: Reset
           kbd_enabled = true;
+          repeat = 0;
           blinking = true;
           add_alarm_in_ms(1, blink_callback, NULL, false);
           
@@ -210,6 +212,7 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_re
     kbd_addr = dev_addr;
     kbd_inst = instance;
     
+    repeat = 0;
     blinking = true;
     add_alarm_in_ms(1, blink_callback, NULL, false);
     
@@ -233,6 +236,7 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
     }
     
     board_led_write(1);
+    memcpy(comp_rpt, prev_rpt, sizeof(comp_rpt));
     
     if(report[0] != prev_rpt[0]) {
       uint8_t rbits = report[0];
@@ -244,8 +248,16 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
           if(j > 2 && j != 5) ps2_send(0xe0);
           
           if(rbits & 0x01) {
+            repeat = j + 1;
+            repeatmod = true;
+            
+            if(repeater) cancel_alarm(repeater);
+            repeater = add_alarm_in_ms(delay_ms, repeat_callback, NULL, false);
+            
             ps2_send(mod2ps2[j]);
           } else {
+            if(j + 1 == repeat && repeatmod) repeat = 0;
+            
             ps2_send(0xf0);
             ps2_send(mod2ps2[j]);
           }
@@ -256,7 +268,7 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
         
       }
       
-      prev_rpt[0] = report[0];
+      comp_rpt[0] = report[0];
     }
     
     for(uint8_t i = 2; i < 8; i++) {
@@ -272,7 +284,7 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
         
         if(brk && report[i] < maparray) {
           if(prev_rpt[i] == 0x48) continue;
-          if(prev_rpt[i] == repeat) repeat = 0;
+          if(prev_rpt[i] == repeat && !repeatmod) repeat = 0;
           
           maybe_send_e0(prev_rpt[i]);
           ps2_send(0xf0);
@@ -291,19 +303,21 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
         }
         
         if(make && report[i] < maparray) {
+          repeat = 0;
+          
           if(report[i] == 0x48) {
-            
             if(report[0] & 0x1 || report[0] & 0x10) {
               ps2_send(0xe0); ps2_send(0x7e); ps2_send(0xe0); ps2_send(0xf0); ps2_send(0x7e);
             } else {
               ps2_send(0xe1); ps2_send(0x14); ps2_send(0x77); ps2_send(0xe1);
               ps2_send(0xf0); ps2_send(0x14); ps2_send(0xf0); ps2_send(0x77);
             }
-            
             continue;
           }
           
           repeat = report[i];
+          repeatmod = false;
+          
           if(repeater) cancel_alarm(repeater);
           repeater = add_alarm_in_ms(delay_ms, repeat_callback, NULL, false);
           
@@ -312,9 +326,10 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
         }
       }
       
-      prev_rpt[i] = report[i];
+      comp_rpt[i] = report[i];
     }
     
+    memcpy(prev_rpt, comp_rpt, sizeof(prev_rpt));
     tuh_hid_receive_report(dev_addr, instance);
     board_led_write(0);
     
@@ -351,8 +366,13 @@ void main() {
       repeating = false;
       
       if(repeat) {
-        maybe_send_e0(repeat);
-        ps2_send(hid2ps2[repeat]);
+        if(repeatmod) {
+           if(repeat > 3 && repeat != 6) ps2_send(0xe0);
+           ps2_send(mod2ps2[repeat - 1]);
+         } else {
+           maybe_send_e0(repeat);
+           ps2_send(hid2ps2[repeat]);
+         }
       }
     }
   }
