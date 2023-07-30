@@ -28,11 +28,6 @@
 #include "bsp/board.h"
 #include "tusb.h"
 
-#define CLKIN  14
-#define CLKOUT 15
-#define DATIN  17
-#define DATOUT 16
-
 uint8_t const led2ps2[] = { 0, 4, 1, 5, 2, 6, 3, 7 };
 uint8_t const mod2ps2[] = { 0x14, 0x12, 0x11, 0x1f, 0x14, 0x59, 0x11, 0x27 };
 uint8_t const hid2ps2[] = {
@@ -62,7 +57,6 @@ uint32_t repeat_us = 35000;
 uint16_t delay_ms = 250;
 alarm_id_t repeater;
 
-uint8_t comp_rpt[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 uint8_t prev_rpt[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 uint8_t prev_ps2 = 0;
 uint8_t resend = 0;
@@ -89,6 +83,7 @@ uint16_t ps2_frame(uint8_t data) {
 }
 
 void ps2_send(uint8_t data) {
+  if(DEBUG) printf("ps2_send: %02x\n", data);
   resend = data;
   pio_sm_put(pio, sm, ps2_frame(data));
 }
@@ -110,14 +105,16 @@ void kbd_set_leds(uint8_t data) {
 }
 
 int64_t blink_callback(alarm_id_t id, void *user_data) {
-  if(kbd_addr) {
-    if(blinking) {
-      kbd_set_leds(7);
-      blinking = false;
-      return 500000;
-    } else {
+  if(blinking) {
+    if(kbd_addr) kbd_set_leds(7);
+    blinking = false;
+    return 500000;
+  } else {
+    if(kbd_addr) {
       kbd_set_leds(0);
       ps2_send(0xaa);
+    } else {
+      ps2_send(0xfc);
     }
   }
   return 0;
@@ -137,6 +134,7 @@ void ps2_receive(uint32_t fifo) {
   }
   
   uint8_t data = fifo;
+  if(DEBUG) printf("ps2_receive: %02x\n", data);
   
   switch(prev_ps2) {
     case 0xed: // CMD: Set LEDs
@@ -208,7 +206,11 @@ void ps2_receive(uint32_t fifo) {
 }
 
 void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_report, uint16_t desc_len) {
+  if(DEBUG) printf("HID device address = %d, instance = %d is mounted\n", dev_addr, instance);
+  
   if(tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_KEYBOARD) {
+    if(DEBUG) printf("HID Interface Protocol = Keyboard\n");
+    
     kbd_addr = dev_addr;
     kbd_inst = instance;
     
@@ -221,6 +223,8 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_re
 }
 
 void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
+  if(DEBUG) printf("HID device address = %d, instance = %d is unmounted\n", dev_addr, instance);
+  
   if(dev_addr == kbd_addr && instance == kbd_inst) {
     kbd_addr = 0;
     kbd_inst = 0;
@@ -236,7 +240,6 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
     }
     
     board_led_write(1);
-    memcpy(comp_rpt, prev_rpt, sizeof(comp_rpt));
     
     if(report[0] != prev_rpt[0]) {
       uint8_t rbits = report[0];
@@ -267,8 +270,6 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
         pbits = pbits >> 1;
         
       }
-      
-      comp_rpt[0] = report[0];
     }
     
     for(uint8_t i = 2; i < 8; i++) {
@@ -325,11 +326,9 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
           ps2_send(hid2ps2[report[i]]);
         }
       }
-      
-      comp_rpt[i] = report[i];
     }
     
-    memcpy(prev_rpt, comp_rpt, sizeof(prev_rpt));
+    memcpy(prev_rpt, report, sizeof(prev_rpt));
     tuh_hid_receive_report(dev_addr, instance);
     board_led_write(0);
     
@@ -339,6 +338,7 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
 void irq_callback(uint gpio, uint32_t events) {
   if(!gpio_get(DATIN) && !pio_interrupt_get(pio, 0)) {
     board_led_write(1);
+    if(DEBUG) printf(" IRQ ");
     pio_sm_drain_tx_fifo(pio, sm);
     pio_sm_exec(pio, sm, pio_encode_jmp(offset + 2));
   }
@@ -346,10 +346,11 @@ void irq_callback(uint gpio, uint32_t events) {
 
 void main() {
   board_init();
+  printf("\n%s-%s DEBUG=%s\n", PICO_PROGRAM_NAME, PICO_PROGRAM_VERSION_STRING, DEBUG ? "true" : "false");
   
   sm = pio_claim_unused_sm(pio, true);
-  offset = pio_add_program(pio, &ps2dev_program);
-  ps2dev_program_init(pio, sm, offset, CLKIN, CLKOUT, DATIN, DATOUT);
+  offset = pio_add_program(pio, &ps2device_program);
+  ps2device_program_init(pio, sm, offset, CLKIN, CLKOUT, DATIN, DATOUT);
   
   gpio_set_irq_enabled_with_callback(CLKIN, GPIO_IRQ_EDGE_RISE, true, &irq_callback);
   tusb_init();
@@ -367,12 +368,12 @@ void main() {
       
       if(repeat) {
         if(repeatmod) {
-           if(repeat > 3 && repeat != 6) ps2_send(0xe0);
-           ps2_send(mod2ps2[repeat - 1]);
-         } else {
-           maybe_send_e0(repeat);
-           ps2_send(hid2ps2[repeat]);
-         }
+          if(repeat > 3 && repeat != 6) ps2_send(0xe0);
+          ps2_send(mod2ps2[repeat - 1]);
+        } else {
+          maybe_send_e0(repeat);
+          ps2_send(hid2ps2[repeat]);
+        }
       }
     }
   }

@@ -17,10 +17,16 @@ pico_sdk_init()
 
 add_executable(ps2pico ps2pico.c)
 
+add_compile_definitions(DEBUG=0)
+add_compile_definitions(CLKIN=14)
+add_compile_definitions(CLKOUT=15)
+add_compile_definitions(DATOUT=16)
+add_compile_definitions(DATIN=17)
+
 pico_generate_pio_header(ps2pico ${CMAKE_CURRENT_LIST_DIR}/ps2device.pio)
 
 pico_set_program_name(ps2pico "ps2pico")
-pico_set_program_version(ps2pico "1.0")
+pico_set_program_version(ps2pico "1.1")
 
 pico_enable_stdio_uart(ps2pico 1)
 pico_enable_stdio_usb(ps2pico 0)
