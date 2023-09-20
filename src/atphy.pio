@@ -4,7 +4,7 @@
 ; SPDX-License-Identifier: MIT
 ;
 
-.program ps2device
+.program atphy
 .side_set 1 opt
 
 start:
@@ -51,8 +51,8 @@ sendloop:
 
 % c-sdk {
 
-  void ps2device_program_init(PIO pio, uint sm, uint offset, uint clkin, uint clkout, uint datin, uint datout) {
-    pio_sm_config c = ps2device_program_get_default_config(offset);
+  void atphy_program_init(PIO pio, uint sm, uint offset, uint clkin, uint clkout, uint datin, uint datout) {
+    pio_sm_config c = atphy_program_get_default_config(offset);
     
     pio_gpio_init(pio, clkout);
     pio_gpio_init(pio, datout);
