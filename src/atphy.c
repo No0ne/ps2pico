@@ -23,11 +23,11 @@
  *
  */
 
-#include "ps2device.pio.h"
-#include "hardware/gpio.h"
-#include "bsp/board.h"
-#include "tusb.h"
+#include "ps2pico.h"
+#include "atphy.pio.h"
+//#include "hardware/gpio.h"
 
+/*
 uint8_t const led2ps2[] = { 0, 4, 1, 5, 2, 6, 3, 7 };
 uint8_t const mod2ps2[] = { 0x14, 0x12, 0x11, 0x1f, 0x14, 0x59, 0x11, 0x27 };
 uint8_t const hid2ps2[] = {
@@ -40,7 +40,6 @@ uint8_t const hid2ps2[] = {
   0x75, 0x7d, 0x70, 0x71, 0x61, 0x2f, 0x37, 0x0f, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38, 0x40,
   0x48, 0x50, 0x57, 0x5f
 };
-uint8_t const maparray = sizeof(hid2ps2) / sizeof(uint8_t);
 
 PIO pio = pio0;
 uint sm;
@@ -222,15 +221,6 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_re
   }
 }
 
-void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
-  if(DEBUG) printf("HID device address = %d, instance = %d is unmounted\n", dev_addr, instance);
-  
-  if(dev_addr == kbd_addr && instance == kbd_inst) {
-    kbd_addr = 0;
-    kbd_inst = 0;
-  }
-}
-
 void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* report, uint16_t len) {
   if(dev_addr == kbd_addr && instance == kbd_inst) {
     
@@ -343,38 +333,4 @@ void irq_callback(uint gpio, uint32_t events) {
     pio_sm_exec(pio, sm, pio_encode_jmp(offset + 2));
   }
 }
-
-void main() {
-  board_init();
-  printf("\n%s-%s DEBUG=%s\n", PICO_PROGRAM_NAME, PICO_PROGRAM_VERSION_STRING, DEBUG ? "true" : "false");
-  
-  sm = pio_claim_unused_sm(pio, true);
-  offset = pio_add_program(pio, &ps2device_program);
-  ps2device_program_init(pio, sm, offset, CLKIN, CLKOUT, DATIN, DATOUT);
-  
-  gpio_set_irq_enabled_with_callback(CLKIN, GPIO_IRQ_EDGE_RISE, true, &irq_callback);
-  tusb_init();
-  
-  while(true) {
-    tuh_task();
-    
-    if(!pio_sm_is_rx_fifo_empty(pio, sm)) {
-      ps2_receive(pio_sm_get(pio, sm));
-      board_led_write(0);
-    }
-    
-    if(repeating) {
-      repeating = false;
-      
-      if(repeat) {
-        if(repeatmod) {
-          if(repeat > 3 && repeat != 6) ps2_send(0xe0);
-          ps2_send(mod2ps2[repeat - 1]);
-        } else {
-          maybe_send_e0(repeat);
-          ps2_send(hid2ps2[repeat]);
-        }
-      }
-    }
-  }
-}
+*/

@@ -1,62 +1,150 @@
-#include <stdio.h>
-#include "pico/stdlib.h"
-#include "hardware/uart.h"
-#include "hardware/divider.h"
-#include "hardware/pio.h"
+/*
+ * The MIT License (MIT)
+ *
+ * Copyright (c) 2022 No0ne (https://github.com/No0ne)
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ */
 
-// UART defines
-// By default the stdout UART is `uart0`, so we will use the second one
-#define UART_ID uart1
-#define BAUD_RATE 9600
+#include "ps2pico.h"
+#include "bsp/board.h"
+#include "tusb.h"
 
-// Use pins 4 and 5 for UART1
-// Pins can be changed, see the GPIO function select table in the datasheet for information on GPIO assignments
-#define UART_TX_PIN 4
-#define UART_RX_PIN 5
+u8 kb_addr = 0;
+u8 kb_inst = 0;
+u8 kb_leds = 0;
 
-// GPIO defines
-// Example uses GPIO 2
-#define GPIO 2
+u8 prev_rpt[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 
+void tuh_kb_set_leds(u8 leds) {
+  if(kb_addr) {
+    kb_leds = leds;
+    printf("HID device address = %d, instance = %d, LEDs = %d\n", kb_addr, kb_inst, kb_leds);
+    tuh_hid_set_report(kb_addr, kb_inst, 0, HID_REPORT_TYPE_OUTPUT, &kb_leds, sizeof(kb_leds));
+  }
+}
 
-
-
-int main()
-{
-    stdio_init_all();
-
-    // Set up our UART
-    uart_init(UART_ID, BAUD_RATE);
-    // Set the TX and RX pins by using the function select on the GPIO
-    // Set datasheet for more information on function select
-    gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
-    gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
+void tuh_hid_mount_cb(u8 dev_addr, u8 instance, u8 const* desc_report, u16 desc_len) {
+  printf("HID device address = %d, instance = %d is mounted\n", dev_addr, instance);
+  
+  if(tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_KEYBOARD) {
+    if(!kb_addr && !kb_inst) {
+      kb_addr = dev_addr;
+      kb_inst = instance;
+      //kb_reset();
+    }
     
+    tuh_hid_receive_report(dev_addr, instance);
+  }
+}
 
-    // GPIO initialisation.
-    // We will make this GPIO an input, and pull it up by default
-    gpio_init(GPIO);
-    gpio_set_dir(GPIO, GPIO_IN);
-    gpio_pull_up(GPIO);
+void tuh_hid_umount_cb(u8 dev_addr, u8 instance) {
+  printf("HID device address = %d, instance = %d is unmounted\r\n", dev_addr, instance);
+  
+  if(dev_addr == kb_addr && instance == kb_inst) {
+    kb_addr = 0;
+    kb_inst = 0;
+  }
+}
+
+void tuh_hid_report_received_cb(u8 dev_addr, u8 instance, u8 const* report, u16 len) {
+  if(tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_KEYBOARD && report[1] == 0) {
     
+    if(report[0] != prev_rpt[0]) {
+      u8 rbits = report[0];
+      u8 pbits = prev_rpt[0];
+      
+      for(u8 j = 0; j < 8; j++) {
+        if((rbits & 0x1) != (pbits & 0x1)) {
+          //kb_send_key(j + 0xe0, rbits & 0x1, report[0]);
+        }
+        
+        rbits = rbits >> 1;
+        pbits = pbits >> 1;
+      }
+    }
+      
+    for(u8 i = 2; i < 8; i++) {
+      if(prev_rpt[i]) {
+        bool brk = true;
+        
+        for(u8 j = 2; j < 8; j++) {
+          if(prev_rpt[i] == report[j]) {
+            brk = false;
+            break;
+          }
+        }
+        
+        if(brk) {
+          //kb_send_key(prev_rpt[i], false, report[0]);
+        }
+      }
+      
+      if(report[i]) {
+        bool make = true;
+        
+        for(u8 j = 2; j < 8; j++) {
+          if(report[i] == prev_rpt[j]) {
+            make = false;
+            break;
+          }
+        }
+        
+        if(make) {
+          //kb_send_key(report[i], true, report[0]);
+        }
+      }
+    }
+    
+    memcpy(prev_rpt, report, sizeof(prev_rpt));
+    tuh_hid_receive_report(dev_addr, instance);
+  }
+}
 
-    // Example of using the HW divider. The pico_divider library provides a more user friendly set of APIs 
-    // over the divider (and support for 64 bit divides), and of course by default regular C language integer
-    // divisions are redirected thru that library, meaning you can just use C level `/` and `%` operators and
-    // gain the benefits of the fast hardware divider.
-    int32_t dividend = 123456;
-    int32_t divisor = -321;
-    // This is the recommended signed fast divider for general use.
-    divmod_result_t result = hw_divider_divmod_s32(dividend, divisor);
-    printf("%d/%d = %d remainder %d\n", dividend, divisor, to_quotient_s32(result), to_remainder_s32(result));
-    // This is the recommended unsigned fast divider for general use.
-    int32_t udividend = 123456;
-    int32_t udivisor = 321;
-    divmod_result_t uresult = hw_divider_divmod_u32(udividend, udivisor);
-    printf("%d/%d = %d remainder %d\n", udividend, udivisor, to_quotient_u32(uresult), to_remainder_u32(uresult));
-
-
-    puts("Hello, world!");
-
-    return 0;
+void main() {
+  board_init();
+  printf("\n%s-%s\n", PICO_PROGRAM_NAME, PICO_PROGRAM_VERSION_STRING);
+  
+  tuh_init(BOARD_TUH_RHPORT);
+  //atphy_init();
+  //xtphy_init();
+  
+  while(1) {
+    tuh_task();
+    
+    /*if(!pio_sm_is_rx_fifo_empty(pio, sm)) {
+      ps2_receive(pio_sm_get(pio, sm));
+    }
+    
+    if(repeating) {
+      repeating = false;
+      
+      if(repeat) {
+        if(repeatmod) {
+          if(repeat > 3 && repeat != 6) ps2_send(0xe0);
+          ps2_send(mod2ps2[repeat - 1]);
+        } else {
+          maybe_send_e0(repeat);
+          ps2_send(hid2ps2[repeat]);
+        }
+      }
+    }*/
+  }
 }

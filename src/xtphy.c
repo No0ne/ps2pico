@@ -23,10 +23,10 @@
  *
  */
 
-#include "hardware/gpio.h"
-#include "bsp/board.h"
-#include "tusb.h"
+#include "ps2pico.h"
+#include "xtphy.pio.h"
 
+/*
 uint8_t const mod2xt[] = { 0x1d, 0x2a, 0x38, 0x5b, 0x1d, 0x36, 0x38, 0x5c };
 uint8_t const hid2xt[] = {
   0x00, 0xff, 0xfc, 0x00, 0x1e, 0x30, 0x2e, 0x20, 0x12, 0x21, 0x22, 0x23, 0x17, 0x24, 0x25, 0x26,
@@ -38,7 +38,6 @@ uint8_t const hid2xt[] = {
   0x48, 0x49, 0x52, 0x53, 0x56, 0x5d, 0x5e, 0x59, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b,
   0x6c, 0x6d, 0x6e, 0x76
 };
-uint8_t const maparray = sizeof(hid2xt) / sizeof(uint8_t);
 
 bool irq_enabled = true;
 bool blinking = false;
@@ -162,14 +161,7 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_re
   }
 }
 
-void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
-  if(DEBUG) printf("HID device address = %d, instance = %d is unmounted\n", dev_addr, instance);
-  
-  if(dev_addr == kbd_addr && instance == kbd_inst) {
-    kbd_addr = 0;
-    kbd_inst = 0;
-  }
-}
+
 
 void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* report, uint16_t len) {
   if(dev_addr == kbd_addr && instance == kbd_inst) {
@@ -230,52 +222,33 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
           xt_send(hid2xt[prev_rpt[i]] ^ 0x80);
         }
       }
-      
-      if(report[i]) {
-        bool make = true;
-        
-        for(uint8_t j = 2; j < 8; j++) {
-          if(report[i] == prev_rpt[j]) {
-            make = false;
-            break;
-          }
-        }
-        
-        if(make && report[i] < maparray) {
-          repeat = 0;
-          
-          if(report[i] == 0x48) {
-            if(report[0] & 0x1 || report[0] & 0x10) {
-              xt_send(0xe0); xt_send(0x46);
-              xt_send(0xe0); xt_send(0xc6);
-            } else {
-              xt_send(0xe1); xt_send(0x1d); xt_send(0x45);
-              xt_send(0xe1); xt_send(0x9d); xt_send(0xc5);
-            }
-            continue;
-          }
-          
-          if(report[i] == 0x53) kbd_set_leds(1);
-          if(report[i] == 0x39) kbd_set_leds(2);
-          if(report[i] == 0x47) kbd_set_leds(4);
-          
-          repeat = report[i];
-          repeatmod = false;
-          
-          if(repeater) cancel_alarm(repeater);
-          repeater = add_alarm_in_ms(DELAY_MS, repeat_callback, NULL, false);
-          
-          maybe_send_e0(report[i]);
-          xt_send(hid2xt[report[i]]);
-        }
-      }
+
+if(make && report[i] < maparray) {
+  repeat = 0;
+  
+  if(report[i] == 0x48) {
+    if(report[0] & 0x1 || report[0] & 0x10) {
+      xt_send(0xe0); xt_send(0x46);
+      xt_send(0xe0); xt_send(0xc6);
+    } else {
+      xt_send(0xe1); xt_send(0x1d); xt_send(0x45);
+      xt_send(0xe1); xt_send(0x9d); xt_send(0xc5);
     }
-    
-    memcpy(prev_rpt, report, sizeof(prev_rpt));
-    tuh_hid_receive_report(dev_addr, instance);
-    board_led_write(0);
-    
+    continue;
   }
+  
+  if(report[i] == 0x53) kbd_set_leds(1);
+  if(report[i] == 0x39) kbd_set_leds(2);
+  if(report[i] == 0x47) kbd_set_leds(4);
+  
+  repeat = report[i];
+  repeatmod = false;
+  
+  if(repeater) cancel_alarm(repeater);
+  repeater = add_alarm_in_ms(DELAY_MS, repeat_callback, NULL, false);
+  
+  maybe_send_e0(report[i]);
+  xt_send(hid2xt[report[i]]);
 }
 
 void irq_callback(uint gpio, uint32_t events) {
@@ -286,45 +259,4 @@ void irq_callback(uint gpio, uint32_t events) {
     add_alarm_in_ms(1, blink_callback, NULL, false);
   }
 }
-
-void main() {
-  board_init();
-  printf("\n%s-%s DEBUG=%s\n", PICO_PROGRAM_NAME, PICO_PROGRAM_VERSION_STRING, DEBUG ? "true" : "false");
-  
-  gpio_init(CLKOUT);
-  gpio_init(DATOUT);
-  gpio_init(CLKIN);
-  gpio_init(DATIN);
-  gpio_set_dir(CLKOUT, GPIO_OUT);
-  gpio_set_dir(DATOUT, GPIO_OUT);
-  gpio_set_dir(CLKIN, GPIO_IN);
-  gpio_set_dir(DATIN, GPIO_IN);
-  gpio_put(CLKOUT, !1);
-  gpio_put(DATOUT, !1);
-  
-  gpio_set_irq_enabled_with_callback(CLKIN, GPIO_IRQ_EDGE_RISE, true, &irq_callback);
-  tusb_init();
-  
-  while(true) {
-    tuh_task();
-    
-    if(repeating) {
-      repeating = false;
-      
-      if(repeat) {
-        if(repeatmod) {
-          if(repeat > 3 && repeat != 6) xt_send(0xe0);
-          xt_send(mod2xt[repeat - 1]);
-        } else {
-          maybe_send_e0(repeat);
-          xt_send(hid2xt[repeat]);
-        }
-      }
-    }
-    
-    if(resetting) {
-      resetting = false;
-      xt_send(0xaa);
-    }
-  }
-}
+*/
