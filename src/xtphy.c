@@ -24,11 +24,14 @@
  */
 
 #include "ps2pico.h"
+#include "pico/stdlib.h"
 #include "xtphy.pio.h"
 
-/*
-uint8_t const mod2xt[] = { 0x1d, 0x2a, 0x38, 0x5b, 0x1d, 0x36, 0x38, 0x5c };
-uint8_t const hid2xt[] = {
+u32 const repeat_us = 91743;
+u16 const delay_ms = 500;
+
+u8 const mod2xt[] = { 0x1d, 0x2a, 0x38, 0x5b, 0x1d, 0x36, 0x38, 0x5c };
+u8 const hid2xt[] = {
   0x00, 0xff, 0xfc, 0x00, 0x1e, 0x30, 0x2e, 0x20, 0x12, 0x21, 0x22, 0x23, 0x17, 0x24, 0x25, 0x26,
   0x32, 0x31, 0x18, 0x19, 0x10, 0x13, 0x1f, 0x14, 0x16, 0x2f, 0x11, 0x2d, 0x15, 0x2c, 0x02, 0x03,
   0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x1c, 0x01, 0x0e, 0x0f, 0x39, 0x0c, 0x0d, 0x1a,
@@ -39,16 +42,106 @@ uint8_t const hid2xt[] = {
   0x6c, 0x6d, 0x6e, 0x76
 };
 
-bool irq_enabled = true;
+
+void xt_send(uint8_t data) {
+  
+  u16 frame = (data ^ 0xff) << 1;
+  
+  printf("  %08x  ", frame);
+  
+  pio_sm_put(pio0, 0, frame);
+}
+
+
+void xt_maybe_send_e0(u8 key) {
+  if(key == 0x46 ||
+    (key >= 0x49 && key <= 0x52) ||
+     key == 0x54 || key == 0x58 ||
+     key == 0x65 || key == 0x66 ||
+    (key > 0xe2 && key != 0xe5)) {
+    xt_send(0xe0);
+  }
+}
+
+void kb_send_key(u8 key, bool state, u8 modifiers) {
+  printf("%02x %d %02x\n", key, state, modifiers);
+  
+  if(key >= sizeof(hid2xt) && key < 0xe0 && key > 0xe7) return;
+  
+  xt_maybe_send_e0(key);
+  
+  if(key >= 0xe0 && key <= 0xe7) {
+    
+    if(state) {
+      xt_send(mod2xt[key - 0xe0]);
+    } else {
+      xt_send(mod2xt[key - 0xe0] | 0x80);
+    }
+    
+  } else {
+    if(state) {
+      xt_send(hid2xt[key]);
+    } else {
+      xt_send(hid2xt[key] | 0x80);
+    }
+  }
+  
+  
+}
+
+void kb_task() {
+  
+/*if(repeating) {
+  repeating = false;
+  
+  if(repeat) {
+    if(repeatmod) {
+      if(repeat > 3 && repeat != 6) ps2_send(0xe0);
+      ps2_send(mod2ps2[repeat - 1]);
+    } else {
+      maybe_send_e0(repeat);
+      ps2_send(hid2ps2[repeat]);
+    }
+  }
+}*/
+  
+}
+
+u8 last_pc;
+u8 stuck;
+
+int64_t reset_detect() {
+  u8 pc = pio_sm_get_pc(pio0, 0);
+  stuck = last_pc == pc ? stuck + 1 : 0;
+  last_pc = pc;
+  
+  if(stuck == 5) {
+    printf(" STALLED ");
+    stuck = 0;
+    return 0;
+  }
+  
+  return 4000;
+}
+
+void kb_init() {
+  
+  xtphy_program_init(pio0, pio_claim_unused_sm(pio0, true), pio_add_program(pio0, &xtphy_program));
+  
+  
+  add_alarm_in_ms(4, reset_detect, NULL, false);
+  
+  printf(" PIO running ");
+}
+
+/*
+
 bool blinking = false;
 bool repeating = false;
 bool repeatmod = false;
 bool resetting = false;
 alarm_id_t repeater;
 
-uint8_t kbd_addr = 0;
-uint8_t kbd_inst = 0;
-uint8_t prev_rpt[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 uint8_t repeat = 0;
 uint8_t leds = 0;
 
@@ -62,62 +155,6 @@ int64_t repeat_callback(alarm_id_t id, void *user_data) {
   return 0;
 }
 
-void xt_cycle_clock() {
-  sleep_us(8);
-  gpio_put(CLKOUT, !1);
-  sleep_us(63);
-  gpio_put(CLKOUT, !0);
-  sleep_us(22);
-}
-
-void xt_set_bit(bool bit) {
-  gpio_put(DATOUT, !bit);
-  xt_cycle_clock();
-}
-
-void xt_send(uint8_t data) {
-  uint8_t timeout = 10;
-  if(DEBUG) printf("xt_send: %02x\n", data);
-  
-  while(timeout) {
-    if(gpio_get(CLKIN) && gpio_get(DATIN)) {
-      
-      irq_enabled = false;
-      
-      gpio_put(DATOUT, !0); sleep_us(10);
-      gpio_put(CLKOUT, !0); sleep_us(5);
-      gpio_put(DATOUT, !1); sleep_us(110);
-      xt_cycle_clock();
-      
-      for(uint8_t i = 0; i < 8; i++) {
-        xt_set_bit(data & 0x01);
-        data = data >> 1;
-      }
-      
-      gpio_put(CLKOUT, !1);
-      sleep_ms(1);
-      gpio_put(DATOUT, !1);
-      
-      irq_enabled = true;
-      return;
-      
-    }
-    
-    timeout--;
-    sleep_ms(10);
-  }
-  
-  if(DEBUG) printf("xt_send: %02x TIMEOUT!\n", data);
-}
-
-void maybe_send_e0(uint8_t data) {
-  if(data == 0x46 ||
-     data >= 0x49 && data <= 0x52 ||
-     data == 0x54 || data == 0x58 ||
-     data == 0x65 || data == 0x66) {
-    xt_send(0xe0);
-  }
-}
 
 void kbd_set_leds(uint8_t data) {
   if(data > 7) {
@@ -144,88 +181,31 @@ int64_t blink_callback(alarm_id_t id, void *user_data) {
   return 0;
 }
 
-void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_report, uint16_t desc_len) {
-  if(DEBUG) printf("HID device address = %d, instance = %d is mounted\n", dev_addr, instance);
-  
-  if(tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_KEYBOARD) {
-    if(DEBUG) printf("HID Interface Protocol = Keyboard\n");
-    
-    kbd_addr = dev_addr;
-    kbd_inst = instance;
-    
     repeat = 0;
     blinking = true;
     add_alarm_in_ms(1, blink_callback, NULL, false);
-    
-    tuh_hid_receive_report(dev_addr, instance);
-  }
+
+
+  repeat = j + 1;
+  repeatmod = true;
+  
+  if(repeater) cancel_alarm(repeater);
+  repeater = add_alarm_in_ms(DELAY_MS, repeat_callback, NULL, false);
+  
+  xt_send(mod2xt[j]);
+} else {
+  if(j + 1 == repeat && repeatmod) repeat = 0;
+  
+  xt_send(mod2xt[j] ^ 0x80);
 }
 
+if(prev_rpt[i] == 0x48) continue;
+if(prev_rpt[i] == repeat && !repeatmod) repeat = 0;
+
+maybe_send_e0(prev_rpt[i]);
+xt_send(hid2xt[prev_rpt[i]] ^ 0x80);
 
 
-void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* report, uint16_t len) {
-  if(dev_addr == kbd_addr && instance == kbd_inst) {
-    
-    if(report[1] != 0) {
-      tuh_hid_receive_report(dev_addr, instance);
-      return;
-    }
-    
-    board_led_write(1);
-    
-    if(report[0] != prev_rpt[0]) {
-      uint8_t rbits = report[0];
-      uint8_t pbits = prev_rpt[0];
-      
-      for(uint8_t j = 0; j < 8; j++) {
-        
-        if((rbits & 0x01) != (pbits & 0x01)) {
-          if(j > 2 && j != 5) xt_send(0xe0);
-          
-          if(rbits & 0x01) {
-            repeat = j + 1;
-            repeatmod = true;
-            
-            if(repeater) cancel_alarm(repeater);
-            repeater = add_alarm_in_ms(DELAY_MS, repeat_callback, NULL, false);
-            
-            xt_send(mod2xt[j]);
-          } else {
-            if(j + 1 == repeat && repeatmod) repeat = 0;
-            
-            xt_send(mod2xt[j] ^ 0x80);
-          }
-        }
-        
-        rbits = rbits >> 1;
-        pbits = pbits >> 1;
-        
-      }
-    }
-    
-    for(uint8_t i = 2; i < 8; i++) {
-      if(prev_rpt[i]) {
-        bool brk = true;
-        
-        for(uint8_t j = 2; j < 8; j++) {
-          if(prev_rpt[i] == report[j]) {
-            brk = false;
-            break;
-          }
-        }
-        
-        if(brk && report[i] < maparray) {
-          if(prev_rpt[i] == 0x48) continue;
-          if(prev_rpt[i] == repeat && !repeatmod) repeat = 0;
-          
-          maybe_send_e0(prev_rpt[i]);
-          xt_send(hid2xt[prev_rpt[i]] ^ 0x80);
-        }
-      }
-
-if(make && report[i] < maparray) {
-  repeat = 0;
-  
   if(report[i] == 0x48) {
     if(report[0] & 0x1 || report[0] & 0x10) {
       xt_send(0xe0); xt_send(0x46);
@@ -249,7 +229,7 @@ if(make && report[i] < maparray) {
   
   maybe_send_e0(report[i]);
   xt_send(hid2xt[report[i]]);
-}
+
 
 void irq_callback(uint gpio, uint32_t events) {
   if(irq_enabled && gpio_get(DATIN)) {

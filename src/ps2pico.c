@@ -42,10 +42,13 @@ void tuh_kb_set_leds(u8 leds) {
 }
 
 void tuh_hid_mount_cb(u8 dev_addr, u8 instance, u8 const* desc_report, u16 desc_len) {
-  printf("HID device address = %d, instance = %d is mounted\n", dev_addr, instance);
+  printf("HID device address = %d, instance = %d is mounted", dev_addr, instance);
   
   if(tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_KEYBOARD) {
+    printf(" - keyboard");
+    
     if(!kb_addr && !kb_inst) {
+      printf(", primary");
       kb_addr = dev_addr;
       kb_inst = instance;
       //kb_reset();
@@ -53,15 +56,20 @@ void tuh_hid_mount_cb(u8 dev_addr, u8 instance, u8 const* desc_report, u16 desc_
     
     tuh_hid_receive_report(dev_addr, instance);
   }
+  
+  printf("\n");
 }
 
 void tuh_hid_umount_cb(u8 dev_addr, u8 instance) {
-  printf("HID device address = %d, instance = %d is unmounted\r\n", dev_addr, instance);
+  printf("HID device address = %d, instance = %d is unmounted", dev_addr, instance);
   
   if(dev_addr == kb_addr && instance == kb_inst) {
+    printf(" - keyboard, primary");
     kb_addr = 0;
     kb_inst = 0;
   }
+  
+  printf("\n");
 }
 
 void tuh_hid_report_received_cb(u8 dev_addr, u8 instance, u8 const* report, u16 len) {
@@ -73,7 +81,7 @@ void tuh_hid_report_received_cb(u8 dev_addr, u8 instance, u8 const* report, u16 
       
       for(u8 j = 0; j < 8; j++) {
         if((rbits & 0x1) != (pbits & 0x1)) {
-          //kb_send_key(j + 0xe0, rbits & 0x1, report[0]);
+          kb_send_key(j + 0xe0, rbits & 0x1, report[0]);
         }
         
         rbits = rbits >> 1;
@@ -93,7 +101,7 @@ void tuh_hid_report_received_cb(u8 dev_addr, u8 instance, u8 const* report, u16 
         }
         
         if(brk) {
-          //kb_send_key(prev_rpt[i], false, report[0]);
+          kb_send_key(prev_rpt[i], false, report[0]);
         }
       }
       
@@ -108,43 +116,27 @@ void tuh_hid_report_received_cb(u8 dev_addr, u8 instance, u8 const* report, u16 
         }
         
         if(make) {
-          //kb_send_key(report[i], true, report[0]);
+          kb_send_key(report[i], true, report[0]);
         }
       }
     }
     
     memcpy(prev_rpt, report, sizeof(prev_rpt));
-    tuh_hid_receive_report(dev_addr, instance);
+    
   }
+  
+  tuh_hid_receive_report(dev_addr, instance);
 }
 
 void main() {
   board_init();
-  printf("\n%s-%s\n", PICO_PROGRAM_NAME, PICO_PROGRAM_VERSION_STRING);
+  printf("\n%s-%s %s version\n", PICO_PROGRAM_NAME, PICO_PROGRAM_VERSION_STRING, ATORXT ? "PS/2+AT" : "XT" );
   
   tuh_init(BOARD_TUH_RHPORT);
-  //atphy_init();
-  //xtphy_init();
+  kb_init();
   
   while(1) {
     tuh_task();
-    
-    /*if(!pio_sm_is_rx_fifo_empty(pio, sm)) {
-      ps2_receive(pio_sm_get(pio, sm));
-    }
-    
-    if(repeating) {
-      repeating = false;
-      
-      if(repeat) {
-        if(repeatmod) {
-          if(repeat > 3 && repeat != 6) ps2_send(0xe0);
-          ps2_send(mod2ps2[repeat - 1]);
-        } else {
-          maybe_send_e0(repeat);
-          ps2_send(hid2ps2[repeat]);
-        }
-      }
-    }*/
+    kb_task();
   }
 }

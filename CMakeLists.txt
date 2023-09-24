@@ -17,14 +17,16 @@ project(ps2pico C CXX ASM)
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
-add_executable(ps2pico src/ps2pico.c src/atphy.c src/xtphy.c)
+## add_compile_definitions(ATORXT=1)
+## add_executable(ps2pico src/ps2pico.c src/atphy.c)
 
-add_compile_definitions(CLKIN=14)
-add_compile_definitions(CLKOUT=15)
-add_compile_definitions(DATOUT=16)
-add_compile_definitions(DATIN=17)
-add_compile_definitions(REPEAT_US=91743)
-add_compile_definitions(DELAY_MS=500)
+add_compile_definitions(ATORXT=0)
+add_executable(ps2pico src/ps2pico.c src/xtphy.c)
+
+add_compile_definitions(CLOCKIN=14)
+add_compile_definitions(CLOCKOUT=15)
+add_compile_definitions(DATAOUT=16)
+add_compile_definitions(DATAIN=17)
 
 pico_generate_pio_header(ps2pico ${CMAKE_CURRENT_LIST_DIR}/src/atphy.pio)
 pico_generate_pio_header(ps2pico ${CMAKE_CURRENT_LIST_DIR}/src/xtphy.pio)
