@@ -40,8 +40,8 @@ sendloop:
     sm_config_set_out_shift(&c, true, true, 10);
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
     
-    pio_sm_set_consecutive_pindirs(pio, sm, CLOCKOUT, 2, true);
     pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_consecutive_pindirs(pio, sm, CLOCKOUT, 2, true);
     pio_sm_set_enabled(pio, sm, true);
   }
 %}

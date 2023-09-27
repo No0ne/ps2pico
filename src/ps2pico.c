@@ -47,11 +47,11 @@ void tuh_hid_mount_cb(u8 dev_addr, u8 instance, u8 const* desc_report, u16 desc_
   if(tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_KEYBOARD) {
     printf(" - keyboard");
     
-    if(!kb_addr && !kb_inst) {
+    if(!kb_addr) {
       printf(", primary");
       kb_addr = dev_addr;
       kb_inst = instance;
-      //kb_reset();
+      kb_reset();
     }
     
     tuh_hid_receive_report(dev_addr, instance);
@@ -88,7 +88,7 @@ void tuh_hid_report_received_cb(u8 dev_addr, u8 instance, u8 const* report, u16 
         pbits = pbits >> 1;
       }
     }
-      
+    
     for(u8 i = 2; i < 8; i++) {
       if(prev_rpt[i]) {
         bool brk = true;
@@ -130,13 +130,13 @@ void tuh_hid_report_received_cb(u8 dev_addr, u8 instance, u8 const* report, u16 
 
 void main() {
   board_init();
-  printf("\n%s-%s %s version\n", PICO_PROGRAM_NAME, PICO_PROGRAM_VERSION_STRING, ATORXT ? "PS/2+AT" : "XT" );
-  
   tuh_init(BOARD_TUH_RHPORT);
   kb_init();
   
+  printf("\n%s-%s %s version\n", PICO_PROGRAM_NAME, PICO_PROGRAM_VERSION_STRING, ATORXT ? "PS/2+AT" : "XT" );
+  
   while(1) {
     tuh_task();
-    kb_task();
+    //kb_task();
   }
 }

@@ -30,6 +30,16 @@
 u32 const repeat_us = 91743;
 u16 const delay_ms = 500;
 
+u8 leds = 0;
+u8 repeat = 0;
+u8 last_pc;
+u8 stuck;
+
+bool blinking = false;
+
+alarm_id_t repeater;
+alarm_id_t resetter;
+
 u8 const mod2xt[] = { 0x1d, 0x2a, 0x38, 0x5b, 0x1d, 0x36, 0x38, 0x5c };
 u8 const hid2xt[] = {
   0x00, 0xff, 0xfc, 0x00, 0x1e, 0x30, 0x2e, 0x20, 0x12, 0x21, 0x22, 0x23, 0x17, 0x24, 0x25, 0x26,
@@ -42,16 +52,9 @@ u8 const hid2xt[] = {
   0x6c, 0x6d, 0x6e, 0x76
 };
 
-
 void xt_send(uint8_t data) {
-  
-  u16 frame = (data ^ 0xff) << 1;
-  
-  printf("  %08x  ", frame);
-  
-  pio_sm_put(pio0, 0, frame);
+  pio_sm_put(pio0, 0, (data ^ 0xff) << 1);
 }
-
 
 void xt_maybe_send_e0(u8 key) {
   if(key == 0x46 ||
@@ -63,52 +66,91 @@ void xt_maybe_send_e0(u8 key) {
   }
 }
 
-void kb_send_key(u8 key, bool state, u8 modifiers) {
-  printf("%02x %d %02x\n", key, state, modifiers);
+void xt_set_led(u8 led) {
+  leds ^= led;
+  tuh_kb_set_leds(leds);
+}
+
+int64_t repeat_callback(alarm_id_t id, void *user_data) {
+  if(repeat) {
+    if(repeat >= 0xe0 && repeat <= 0xe7) {
+      xt_send(mod2xt[repeat - 0xe0]);
+    } else {
+      xt_send(hid2xt[repeat]);
+    }
+    
+    return repeat_us;
+  }
   
-  if(key >= sizeof(hid2xt) && key < 0xe0 && key > 0xe7) return;
+  repeater = 0;
+  return 0;
+}
+
+void kb_send_key(u8 key, bool state, u8 modifiers) {
+  if(key > 0x73 && key < 0xe0 && key > 0xe7) return;
+  
+  if(state && key == 0x53) xt_set_led(1);
+  if(state && key == 0x39) xt_set_led(2);
+  if(state && key == 0x47) xt_set_led(4);
+  
+  if(key == 0x48) {
+    repeat = 0;
+    
+    if(state) {
+      if(modifiers & 0x1 || modifiers & 0x10) {
+        xt_send(0xe0); xt_send(0x46);
+        xt_send(0xe0); xt_send(0xc6);
+      } else {
+        xt_send(0xe1); xt_send(0x1d); xt_send(0x45);
+        xt_send(0xe1); xt_send(0x9d); xt_send(0xc5);
+      }
+    }
+    
+    return;
+  }
+  
+  if(state) {
+    repeat = key;
+    if(repeater) cancel_alarm(repeater);
+    repeater = add_alarm_in_ms(delay_ms, repeat_callback, NULL, false);
+  } else {
+    if(key == repeat) repeat = 0;
+  }
   
   xt_maybe_send_e0(key);
   
   if(key >= 0xe0 && key <= 0xe7) {
-    
-    if(state) {
-      xt_send(mod2xt[key - 0xe0]);
-    } else {
-      xt_send(mod2xt[key - 0xe0] | 0x80);
-    }
-    
+    key = mod2xt[key - 0xe0];
   } else {
-    if(state) {
-      xt_send(hid2xt[key]);
-    } else {
-      xt_send(hid2xt[key] | 0x80);
-    }
+    key = hid2xt[key];
   }
   
-  
-}
-
-void kb_task() {
-  
-/*if(repeating) {
-  repeating = false;
-  
-  if(repeat) {
-    if(repeatmod) {
-      if(repeat > 3 && repeat != 6) ps2_send(0xe0);
-      ps2_send(mod2ps2[repeat - 1]);
-    } else {
-      maybe_send_e0(repeat);
-      ps2_send(hid2ps2[repeat]);
-    }
+  if(state) {
+    xt_send(key);
+  } else {
+    xt_send(key | 0x80);
   }
-}*/
-  
 }
 
-u8 last_pc;
-u8 stuck;
+int64_t blink_callback(alarm_id_t id, void *user_data) {
+  if(blinking) {
+    tuh_kb_set_leds(7);
+    blinking = false;
+    return 500000;
+  }
+  
+  tuh_kb_set_leds(leds);
+  return 0;
+}
+
+int64_t kb_reset() {
+  xt_send(0xaa);
+  leds = 0;
+  repeat = 0;
+  blinking = true;
+  add_alarm_in_ms(50, blink_callback, NULL, false);
+  return 0;
+}
 
 int64_t reset_detect() {
   u8 pc = pio_sm_get_pc(pio0, 0);
@@ -116,127 +158,16 @@ int64_t reset_detect() {
   last_pc = pc;
   
   if(stuck == 5) {
-    printf(" STALLED ");
     stuck = 0;
-    return 0;
+    pio_sm_drain_tx_fifo(pio0, 0);
+    if(resetter) cancel_alarm(resetter);
+    resetter = add_alarm_in_ms(50, kb_reset, NULL, false);
   }
   
-  return 4000;
+  return 5000;
 }
 
 void kb_init() {
-  
-  xtphy_program_init(pio0, pio_claim_unused_sm(pio0, true), pio_add_program(pio0, &xtphy_program));
-  
-  
-  add_alarm_in_ms(4, reset_detect, NULL, false);
-  
-  printf(" PIO running ");
+  xtphy_program_init(pio0, 0, pio_add_program(pio0, &xtphy_program));
+  add_alarm_in_ms(1000, reset_detect, NULL, false);
 }
-
-/*
-
-bool blinking = false;
-bool repeating = false;
-bool repeatmod = false;
-bool resetting = false;
-alarm_id_t repeater;
-
-uint8_t repeat = 0;
-uint8_t leds = 0;
-
-int64_t repeat_callback(alarm_id_t id, void *user_data) {
-  if(repeat) {
-    repeating = true;
-    return REPEAT_US;
-  }
-  
-  repeater = 0;
-  return 0;
-}
-
-
-void kbd_set_leds(uint8_t data) {
-  if(data > 7) {
-    leds = 7;
-  } else if(data < 1) {
-    leds = 0;
-  } else {
-    leds ^= data;
-  }
-  tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, &leds, sizeof(leds));
-}
-
-int64_t blink_callback(alarm_id_t id, void *user_data) {
-  if(kbd_addr) {
-    if(blinking) {
-      kbd_set_leds(7);
-      blinking = false;
-      return 500000;
-    } else {
-      kbd_set_leds(0);
-      resetting = true;
-    }
-  }
-  return 0;
-}
-
-    repeat = 0;
-    blinking = true;
-    add_alarm_in_ms(1, blink_callback, NULL, false);
-
-
-  repeat = j + 1;
-  repeatmod = true;
-  
-  if(repeater) cancel_alarm(repeater);
-  repeater = add_alarm_in_ms(DELAY_MS, repeat_callback, NULL, false);
-  
-  xt_send(mod2xt[j]);
-} else {
-  if(j + 1 == repeat && repeatmod) repeat = 0;
-  
-  xt_send(mod2xt[j] ^ 0x80);
-}
-
-if(prev_rpt[i] == 0x48) continue;
-if(prev_rpt[i] == repeat && !repeatmod) repeat = 0;
-
-maybe_send_e0(prev_rpt[i]);
-xt_send(hid2xt[prev_rpt[i]] ^ 0x80);
-
-
-  if(report[i] == 0x48) {
-    if(report[0] & 0x1 || report[0] & 0x10) {
-      xt_send(0xe0); xt_send(0x46);
-      xt_send(0xe0); xt_send(0xc6);
-    } else {
-      xt_send(0xe1); xt_send(0x1d); xt_send(0x45);
-      xt_send(0xe1); xt_send(0x9d); xt_send(0xc5);
-    }
-    continue;
-  }
-  
-  if(report[i] == 0x53) kbd_set_leds(1);
-  if(report[i] == 0x39) kbd_set_leds(2);
-  if(report[i] == 0x47) kbd_set_leds(4);
-  
-  repeat = report[i];
-  repeatmod = false;
-  
-  if(repeater) cancel_alarm(repeater);
-  repeater = add_alarm_in_ms(DELAY_MS, repeat_callback, NULL, false);
-  
-  maybe_send_e0(report[i]);
-  xt_send(hid2xt[report[i]]);
-
-
-void irq_callback(uint gpio, uint32_t events) {
-  if(irq_enabled && gpio_get(DATIN)) {
-    if(DEBUG) printf("IRQ: resetting!\n");
-    repeat = 0;
-    blinking = true;
-    add_alarm_in_ms(1, blink_callback, NULL, false);
-  }
-}
-*/

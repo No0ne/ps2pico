@@ -31,6 +31,9 @@ typedef uint8_t u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
 
-void kb_send_key(u8 key, bool state, u8 modifiers);
-void kb_task();
+void tuh_kb_set_leds(u8 leds);
+
 void kb_init();
+//void kb_task();
+void kb_send_key(u8 key, bool state, u8 modifiers);
+int64_t kb_reset();
