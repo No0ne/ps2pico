@@ -80,8 +80,8 @@ void tuh_hid_report_received_cb(u8 dev_addr, u8 instance, u8 const* report, u16 
       u8 pbits = prev_rpt[0];
       
       for(u8 j = 0; j < 8; j++) {
-        if((rbits & 0x1) != (pbits & 0x1)) {
-          kb_send_key(j + 0xe0, rbits & 0x1, report[0]);
+        if((rbits & 1) != (pbits & 1)) {
+          kb_send_key(HID_KEY_CONTROL_LEFT + j, rbits & 1, report[0]);
         }
         
         rbits = rbits >> 1;
@@ -133,10 +133,18 @@ void main() {
   tuh_init(BOARD_TUH_RHPORT);
   kb_init();
   
-  printf("\n%s-%s %s version\n", PICO_PROGRAM_NAME, PICO_PROGRAM_VERSION_STRING, ATORXT ? "PS/2+AT" : "XT" );
+  printf("\n%s-%s ", PICO_PROGRAM_NAME, PICO_PROGRAM_VERSION_STRING);
+  #ifdef ATPHY
+    printf("PS/2+AT version\n");
+  #endif
+  #ifdef XTPHY
+    printf("XT version\n");
+  #endif
   
   while(1) {
     tuh_task();
-    //kb_task();
+    #ifdef ATPHY
+      kb_task();
+    #endif
   }
 }

@@ -24,13 +24,13 @@
  */
 
 #include "ps2pico.h"
+#include "tusb.h"
 #include "atphy.pio.h"
-//#include "hardware/gpio.h"
+#include "pico/util/queue.h"
 
-/*
-uint8_t const led2ps2[] = { 0, 4, 1, 5, 2, 6, 3, 7 };
-uint8_t const mod2ps2[] = { 0x14, 0x12, 0x11, 0x1f, 0x14, 0x59, 0x11, 0x27 };
-uint8_t const hid2ps2[] = {
+u8 const led2ps2[] = { 0, 4, 1, 5, 2, 6, 3, 7 };
+u8 const mod2ps2[] = { 0x14, 0x12, 0x11, 0x1f, 0x14, 0x59, 0x11, 0x27 };
+u8 const hid2ps2[] = {
   0x00, 0x00, 0xfc, 0x00, 0x1c, 0x32, 0x21, 0x23, 0x24, 0x2b, 0x34, 0x33, 0x43, 0x3b, 0x42, 0x4b,
   0x3a, 0x31, 0x44, 0x4d, 0x15, 0x2d, 0x1b, 0x2c, 0x3c, 0x2a, 0x1d, 0x22, 0x35, 0x1a, 0x16, 0x1e,
   0x26, 0x25, 0x2e, 0x36, 0x3d, 0x3e, 0x46, 0x45, 0x5a, 0x76, 0x66, 0x0d, 0x29, 0x4e, 0x55, 0x54,
@@ -40,31 +40,94 @@ uint8_t const hid2ps2[] = {
   0x75, 0x7d, 0x70, 0x71, 0x61, 0x2f, 0x37, 0x0f, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38, 0x40,
   0x48, 0x50, 0x57, 0x5f
 };
+u32 const repeats[] = {
+  33333, 37453, 41667, 45872, 48309, 54054, 58480, 62500,
+  66667, 75188, 83333, 91743, 100000, 108696, 116279, 125000,
+  133333, 149254, 166667, 181818, 200000, 217391, 232558, 250000,
+  270270, 303030, 333333, 370370, 400000, 434783, 476190, 500000
+};
+u16 const delays[] = { 250, 500, 750, 1000 };
 
-PIO pio = pio0;
-uint sm;
-uint offset;
+queue_t qbytes;
+queue_t qpacks;
 
-bool kbd_enabled = true;
-uint8_t kbd_addr = 0;
-uint8_t kbd_inst = 0;
+u8 busy = 0;
+u8 sent = 0;
+u8 last_tx = 0;
+u8 last_rx = 0;
+u8 repeat = 0;
 
+bool kb_enabled = true;
 bool blinking = false;
-bool repeating = false;
-bool repeatmod = false;
-uint32_t repeat_us = 35000;
-uint16_t delay_ms = 250;
+u32 repeat_us;
+u16 delay_ms;
 alarm_id_t repeater;
 
-uint8_t prev_rpt[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
-uint8_t prev_ps2 = 0;
-uint8_t resend = 0;
-uint8_t repeat = 0;
-uint8_t leds = 0;
+u32 at_frame(u8 byte) {
+  bool parity = 1;
+  for(u8 i = 0; i < 8; i++) {
+    parity = parity ^ (byte >> i & 1);
+  }
+  return ((1 << 10) | (parity << 9) | (byte << 1)) ^ 0x7ff;
+}
 
-int64_t repeat_callback(alarm_id_t id, void *user_data) {
+void at_send(u8 byte) {
+  queue_try_add(&qbytes, &byte);
+}
+
+void at_maybe_send_e0(u8 key) {
+  if(key == HID_KEY_PRINT_SCREEN ||
+     key >= HID_KEY_INSERT && key <= HID_KEY_ARROW_UP ||
+     key == HID_KEY_KEYPAD_DIVIDE ||
+     key == HID_KEY_KEYPAD_ENTER ||
+     key == HID_KEY_APPLICATION ||
+     key == HID_KEY_POWER ||
+     key >= HID_KEY_GUI_LEFT && key != HID_KEY_SHIFT_RIGHT) {
+    at_send(0xe0);
+  }
+}
+
+void kb_set_leds(u8 byte) {
+  if(byte > 7) byte = 0;
+  tuh_kb_set_leds(led2ps2[byte]);
+}
+
+int64_t blink_callback(alarm_id_t id, void *user_data) {
+  if(blinking) {
+    kb_set_leds(KEYBOARD_LED_NUMLOCK | KEYBOARD_LED_CAPSLOCK | KEYBOARD_LED_SCROLLLOCK);
+    blinking = false;
+    return 500000;
+  }
+  
+  //if(kb_addr) {
+  kb_set_leds(0);
+  at_send(0xaa);
+  //} else {
+  //  kb_send(0xfc);
+  //}
+  
+  return 0;
+}
+
+int64_t kb_reset() {
+  kb_enabled = true;
+  repeat_us = 91743;
+  delay_ms = 500;
+  repeat = 0;
+  blinking = true;
+  add_alarm_in_ms(1, blink_callback, NULL, false);
+}
+
+int64_t repeat_callback() {
   if(repeat) {
-    repeating = true;
+    at_maybe_send_e0(repeat);
+    
+    if(repeat >= HID_KEY_CONTROL_LEFT && repeat <= HID_KEY_GUI_RIGHT) {
+      at_send(mod2ps2[repeat - HID_KEY_CONTROL_LEFT]);
+    } else {
+      at_send(hid2ps2[repeat]);
+    }
+    
     return repeat_us;
   }
   
@@ -72,265 +135,171 @@ int64_t repeat_callback(alarm_id_t id, void *user_data) {
   return 0;
 }
 
-uint16_t ps2_frame(uint8_t data) {
-  uint8_t parity = 1;
-  for(uint8_t i = 0; i < 8; i++) {
-    parity = parity ^ (data >> i & 1);
-  }
+void kb_send_key(u8 key, bool state, u8 modifiers) {
+  if(key > HID_KEY_F24 &&
+     key < HID_KEY_CONTROL_LEFT ||
+     key > HID_KEY_GUI_RIGHT) return;
   
-  return ((1 << 10) | (parity << 9) | (data << 1)) ^ 0x7ff;
-}
-
-void ps2_send(uint8_t data) {
-  if(DEBUG) printf("ps2_send: %02x\n", data);
-  resend = data;
-  pio_sm_put(pio, sm, ps2_frame(data));
-}
-
-void maybe_send_e0(uint8_t data) {
-  if(data == 0x46 ||
-     data >= 0x49 && data <= 0x52 ||
-     data == 0x54 || data == 0x58 ||
-     data == 0x65 || data == 0x66 ||
-     data >= 0x81) {
-    ps2_send(0xe0);
-  }
-}
-
-void kbd_set_leds(uint8_t data) {
-  if(data > 7) data = 0;
-  leds = led2ps2[data];
-  tuh_hid_set_report(kbd_addr, kbd_inst, 0, HID_REPORT_TYPE_OUTPUT, &leds, sizeof(leds));
-}
-
-int64_t blink_callback(alarm_id_t id, void *user_data) {
-  if(blinking) {
-    if(kbd_addr) kbd_set_leds(7);
-    blinking = false;
-    return 500000;
-  } else {
-    if(kbd_addr) {
-      kbd_set_leds(0);
-      ps2_send(0xaa);
-    } else {
-      ps2_send(0xfc);
-    }
-  }
-  return 0;
-}
-
-void ps2_receive(uint32_t fifo) {
-  fifo = fifo >> 23;
-  
-  uint8_t parity = 1;
-  for(uint8_t i = 0; i < 8; i++) {
-    parity = parity ^ (fifo >> i & 1);
-  }
-  
-  if(parity != fifo >> 8) {
-    ps2_send(0xfe);
+  printf("HID code = %02x, state = %01x\n", key, state);
+  if(!kb_enabled) {
+    printf("kb_enabled = false\n");
     return;
   }
   
-  uint8_t data = fifo;
-  if(DEBUG) printf("ps2_receive: %02x\n", data);
+  if(key == HID_KEY_PAUSE) {
+    repeat = 0;
+    
+    if(state) {
+      if(modifiers & KEYBOARD_MODIFIER_LEFTCTRL ||
+         modifiers & KEYBOARD_MODIFIER_RIGHTCTRL) {
+        at_send(0xe0); at_send(0x7e); at_send(0xe0); at_send(0xf0); at_send(0x7e);
+      } else {
+        at_send(0xe1); at_send(0x14); at_send(0x77); at_send(0xe1);
+        at_send(0xf0); at_send(0x14); at_send(0xf0); at_send(0x77);
+      }
+    }
+    
+    return;
+  }
   
-  switch(prev_ps2) {
-    case 0xed: // CMD: Set LEDs
-      prev_ps2 = 0;
-      kbd_set_leds(data);
+  at_maybe_send_e0(key);
+  
+  if(state) {
+    repeat = key;
+    if(repeater) cancel_alarm(repeater);
+    repeater = add_alarm_in_ms(delay_ms, repeat_callback, NULL, false);
+  } else {
+    if(key == repeat) repeat = 0;
+    at_send(0xf0);
+  }
+  
+  if(key >= HID_KEY_CONTROL_LEFT && key <= HID_KEY_GUI_RIGHT) {
+    at_send(mod2ps2[key - HID_KEY_CONTROL_LEFT]);
+  } else {
+    at_send(hid2ps2[key]);
+  }
+}
+
+void kb_receive(u8 byte, u8 prev_byte) {
+  switch (prev_byte) {
+    case 0xed: // Set LEDs
+      kb_set_leds(byte);
     break;
     
-    case 0xf3: // CMD: Set typematic rate and delay
-      prev_ps2 = 0;
-      repeat_us = data & 0x1f;
-      delay_ms = data & 0x60;
-      
-      repeat_us = 35000 + repeat_us * 15000;
-      
-      if(delay_ms == 0x00) delay_ms = 250;
-      if(delay_ms == 0x20) delay_ms = 500;
-      if(delay_ms == 0x40) delay_ms = 750;
-      if(delay_ms == 0x60) delay_ms = 1000;
+    case 0xf3: // Set typematic rate and delay
+      repeat_us = repeats[byte & 0x1f];
+      delay_ms = delays[(byte & 0x60) >> 5];
     break;
     
     default:
-      switch(data) {
-        case 0xff: // CMD: Reset
-          kbd_enabled = true;
+      switch (byte) {
+        case 0xff: // Reset
+          kb_reset();
+        break;
+        
+        case 0xee: // Echo
+          at_send(0xee);
+        return;
+        
+        case 0xf2: // Identify keyboard
+          at_send(0xfa);
+          at_send(0xab);
+          at_send(0x83);
+        return;
+        
+        case 0xf4: // Enable scanning
+          kb_enabled = true;
+        break;
+        
+        case 0xf5: // Disable scanning, restore default parameters
+        case 0xf6: // Set default parameters
+          kb_enabled = byte == 0xf6;
+          repeat_us = 91743;
+          delay_ms = 500;
           repeat = 0;
-          blinking = true;
-          add_alarm_in_ms(1, blink_callback, NULL, false);
-          
-          pio_sm_clear_fifos(pio, sm);
-          pio_sm_drain_tx_fifo(pio, sm);
-          ps2_send(0xfa);
-        return;
-        
-        case 0xfe: // CMD: Resend
-          ps2_send(resend);
-        return;
-        
-        case 0xee: // CMD: Echo
-          ps2_send(0xee);
-        return;
-        
-        case 0xf2: // CMD: Identify keyboard
-          ps2_send(0xfa);
-          ps2_send(0xab);
-          ps2_send(0x83);
-        return;
-        
-        case 0xf3: // CMD: Set typematic rate and delay
-        case 0xed: // CMD: Set LEDs
-          prev_ps2 = data;
-        break;
-        
-        case 0xf4: // CMD: Enable scanning
-          kbd_enabled = true;
-        break;
-        
-        case 0xf5: // CMD: Disable scanning, restore default parameters
-        case 0xf6: // CMD: Set default parameters
-          kbd_enabled = data == 0xf6;
-          repeat_us = 35000;
-          delay_ms = 250;
-          kbd_set_leds(0);
+          kb_set_leds(0);
         break;
       }
     break;
   }
   
-  ps2_send(0xfa);
+  at_send(0xfa);
 }
 
-void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_report, uint16_t desc_len) {
-  if(DEBUG) printf("HID device address = %d, instance = %d is mounted\n", dev_addr, instance);
+void kb_task() {
+  u8 i = 0;
+  u8 byte;
+  u8 pack[9];
   
-  if(tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_KEYBOARD) {
-    if(DEBUG) printf("HID Interface Protocol = Keyboard\n");
+  if(!queue_is_empty(&qbytes)) {
+    printf("TX:");
+    while(i < 9 && queue_try_remove(&qbytes, &byte)) {
+      i++;
+      pack[i] = byte;
+      printf(" %02x", byte);
+    }
+    printf("\n");
     
-    kbd_addr = dev_addr;
-    kbd_inst = instance;
-    
-    repeat = 0;
-    blinking = true;
-    add_alarm_in_ms(1, blink_callback, NULL, false);
-    
-    tuh_hid_receive_report(dev_addr, instance);
+    pack[0] = i;
+    queue_try_add(&qpacks, &pack);
   }
-}
-
-void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* report, uint16_t len) {
-  if(dev_addr == kbd_addr && instance == kbd_inst) {
+  
+  if(pio_interrupt_get(pio0, 0)) {
+    busy = 1;
+  } else {
+    busy &= 2;
+  }
+  
+  if(pio_interrupt_get(pio0, 1)) {
+    sent--;
+    pio_interrupt_clear(pio0, 1);
+  }
+  
+  if(!queue_is_empty(&qpacks) && pio_sm_is_tx_fifo_empty(pio0, 0) && !busy) {
+    if(queue_try_peek(&qpacks, &pack)) {
+      if(sent == pack[0]) {
+        sent = 0;
+        queue_try_remove(&qpacks, &pack);
+      } else {
+        sent++;
+        last_tx = pack[sent];
+        busy |= 2;
+        pio_sm_put(pio0, 0, at_frame(last_tx));
+      }
+    }
+  }
+  
+  if(!pio_sm_is_rx_fifo_empty(pio0, 0)) {
+    u32 fifo = pio_sm_get(pio0, 0) >> 23;
     
-    if(!kbd_enabled || report[1] != 0) {
-      tuh_hid_receive_report(dev_addr, instance);
+    bool parity = 1;
+    for(i = 0; i < 8; i++) {
+      parity = parity ^ (fifo >> i & 1);
+    }
+    
+    if(parity != fifo >> 8) {
+      pio_sm_put(pio0, 0, at_frame(0xfe));
       return;
     }
     
-    board_led_write(1);
-    
-    if(report[0] != prev_rpt[0]) {
-      uint8_t rbits = report[0];
-      uint8_t pbits = prev_rpt[0];
-      
-      for(uint8_t j = 0; j < 8; j++) {
-        
-        if((rbits & 0x01) != (pbits & 0x01)) {
-          if(j > 2 && j != 5) ps2_send(0xe0);
-          
-          if(rbits & 0x01) {
-            repeat = j + 1;
-            repeatmod = true;
-            
-            if(repeater) cancel_alarm(repeater);
-            repeater = add_alarm_in_ms(delay_ms, repeat_callback, NULL, false);
-            
-            ps2_send(mod2ps2[j]);
-          } else {
-            if(j + 1 == repeat && repeatmod) repeat = 0;
-            
-            ps2_send(0xf0);
-            ps2_send(mod2ps2[j]);
-          }
-        }
-        
-        rbits = rbits >> 1;
-        pbits = pbits >> 1;
-        
-      }
+    if(fifo & 0xff == 0xfe) {
+      pio_sm_put(pio0, 0, at_frame(last_tx));
+      return;
     }
     
-    for(uint8_t i = 2; i < 8; i++) {
-      if(prev_rpt[i]) {
-        bool brk = true;
-        
-        for(uint8_t j = 2; j < 8; j++) {
-          if(prev_rpt[i] == report[j]) {
-            brk = false;
-            break;
-          }
-        }
-        
-        if(brk && report[i] < maparray) {
-          if(prev_rpt[i] == 0x48) continue;
-          if(prev_rpt[i] == repeat && !repeatmod) repeat = 0;
-          
-          maybe_send_e0(prev_rpt[i]);
-          ps2_send(0xf0);
-          ps2_send(hid2ps2[prev_rpt[i]]);
-        }
-      }
-      
-      if(report[i]) {
-        bool make = true;
-        
-        for(uint8_t j = 2; j < 8; j++) {
-          if(report[i] == prev_rpt[j]) {
-            make = false;
-            break;
-          }
-        }
-        
-        if(make && report[i] < maparray) {
-          repeat = 0;
-          
-          if(report[i] == 0x48) {
-            if(report[0] & 0x1 || report[0] & 0x10) {
-              ps2_send(0xe0); ps2_send(0x7e); ps2_send(0xe0); ps2_send(0xf0); ps2_send(0x7e);
-            } else {
-              ps2_send(0xe1); ps2_send(0x14); ps2_send(0x77); ps2_send(0xe1);
-              ps2_send(0xf0); ps2_send(0x14); ps2_send(0xf0); ps2_send(0x77);
-            }
-            continue;
-          }
-          
-          repeat = report[i];
-          repeatmod = false;
-          
-          if(repeater) cancel_alarm(repeater);
-          repeater = add_alarm_in_ms(delay_ms, repeat_callback, NULL, false);
-          
-          maybe_send_e0(report[i]);
-          ps2_send(hid2ps2[report[i]]);
-        }
-      }
-    }
+    while(queue_try_remove(&qbytes, &byte));
+    while(queue_try_remove(&qpacks, &pack));
+    sent = 0;
     
-    memcpy(prev_rpt, report, sizeof(prev_rpt));
-    tuh_hid_receive_report(dev_addr, instance);
-    board_led_write(0);
+    printf("RX: %02x\n", fifo & 0xff);
     
+    kb_receive(fifo, last_rx);
+    last_rx = fifo;
   }
 }
 
-void irq_callback(uint gpio, uint32_t events) {
-  if(!gpio_get(DATIN) && !pio_interrupt_get(pio, 0)) {
-    board_led_write(1);
-    if(DEBUG) printf(" IRQ ");
-    pio_sm_drain_tx_fifo(pio, sm);
-    pio_sm_exec(pio, sm, pio_encode_jmp(offset + 2));
-  }
+void kb_init() {
+  atphy_program_init(pio0, 0, pio_add_program(pio0, &atphy_program));
+  queue_init(&qbytes, sizeof(u8), 9);
+  queue_init(&qpacks, sizeof(u8) * 9, 16);
 }
-*/

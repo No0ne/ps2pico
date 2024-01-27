@@ -24,6 +24,7 @@
  */
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
 
@@ -34,6 +35,6 @@ typedef uint32_t u32;
 void tuh_kb_set_leds(u8 leds);
 
 void kb_init();
-//void kb_task();
+void kb_task();
 void kb_send_key(u8 key, bool state, u8 modifiers);
 int64_t kb_reset();

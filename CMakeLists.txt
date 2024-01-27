@@ -17,11 +17,11 @@ project(ps2pico C CXX ASM)
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
-## add_compile_definitions(ATORXT=1)
-## add_executable(ps2pico src/ps2pico.c src/atphy.c)
+add_compile_definitions(ATPHY)
+add_executable(ps2pico src/ps2pico.c src/atphy.c)
 
-add_compile_definitions(ATORXT=0)
-add_executable(ps2pico src/ps2pico.c src/xtphy.c)
+##add_compile_definitions(XTPHY)
+##add_executable(ps2pico src/ps2pico.c src/xtphy.c)
 
 add_compile_definitions(CLOCKIN=14)
 add_compile_definitions(CLOCKOUT=15)
