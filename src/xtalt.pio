@@ -1,0 +1,47 @@
+;
+; Copyright (c) 2024 No0ne (https://github.com/No0ne)
+;
+; SPDX-License-Identifier: MIT
+;
+
+.program xtalt
+
+;restart:
+;  wait   1 pin, 0                   // wait for clock to be pulled high
+;  jmp    !osre, send                // see if we have data to send
+;  jmp    restart                    // no data to send, restart
+;
+;send:
+;  set    x, 8                       // number of bits to write out
+;  jmp    pin, sendloop              // if data is being pulled low, restart
+;  jmp    restart
+;
+;sendloop:
+;  set    pins, 0                    // set clock high
+;  out    pins, 1                    // write out data
+;  set    pins, 1                    // set clock low
+;  jmp    x--, sendloop
+;  set    pins, 0                    // set clock high
+;  out    pins, 1                    // set data high
+;  jmp    restart
+
+% c-sdk {
+  void xtalt_program_init(PIO pio, uint sm, uint offset) {
+    pio_sm_config c = xtalt_program_get_default_config(offset);
+    
+    /*pio_gpio_init(pio, CLOCKOUT);
+    pio_gpio_init(pio, DATAOUT);
+    
+    sm_config_set_clkdiv(&c, 2880);
+    sm_config_set_in_pins(&c, CLOCKIN);
+    sm_config_set_jmp_pin(&c, DATAIN);
+    sm_config_set_set_pins(&c, CLOCKOUT, 1);
+    sm_config_set_out_pins(&c, DATAOUT, 1);
+    sm_config_set_out_shift(&c, true, true, 10);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+    
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_consecutive_pindirs(pio, sm, CLOCKOUT, 2, true);*/
+    pio_sm_set_enabled(pio, sm, true);
+  }
+%}

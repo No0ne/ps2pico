@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2022 No0ne (https://github.com/No0ne)
+ * Copyright (c) 2024 No0ne (https://github.com/No0ne)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,7 +25,12 @@
 
 #include "ps2pico.h"
 #include "tusb.h"
-#include "xtphy.pio.h"
+#ifdef XTPHY
+  #include "xtphy.pio.h"
+#endif
+#ifdef XTALT
+  #include "xtalt.pio.h"
+#endif
 
 u8 const mod2xt[] = { 0x1d, 0x2a, 0x38, 0x5b, 0x1d, 0x36, 0x38, 0x5c };
 u8 const hid2xt[] = {
@@ -53,6 +58,7 @@ alarm_id_t repeater;
 alarm_id_t resetter;
 
 void xt_send(u8 byte) {
+  printf("TX: %02x\n", byte);
   pio_sm_put(pio0, 0, (byte ^ 0xff) << 1);
 }
 
@@ -73,7 +79,7 @@ void xt_set_led(u8 led) {
   tuh_kb_set_leds(leds);
 }
 
-int64_t repeat_callback(alarm_id_t id, void *user_data) {
+s64 repeat_callback(alarm_id_t id, void *user_data) {
   if(repeat) {
     xt_maybe_send_e0(repeat);
     
@@ -95,8 +101,9 @@ void kb_send_key(u8 key, bool state, u8 modifiers) {
      key < HID_KEY_CONTROL_LEFT ||
      key > HID_KEY_GUI_RIGHT) return;
   
+  printf("HID code = %02x, state = %01x\n", key, state);
+  
   if(state) {
-    printf("HID code = %02x", key);
     if(key == HID_KEY_NUM_LOCK) xt_set_led(KEYBOARD_LED_NUMLOCK);
     if(key == HID_KEY_CAPS_LOCK) xt_set_led(KEYBOARD_LED_CAPSLOCK);
     if(key == HID_KEY_SCROLL_LOCK) xt_set_led(KEYBOARD_LED_SCROLLLOCK);
@@ -142,7 +149,7 @@ void kb_send_key(u8 key, bool state, u8 modifiers) {
   }
 }
 
-int64_t blink_callback(alarm_id_t id, void *user_data) {
+s64 blink_callback(alarm_id_t id, void *user_data) {
   if(blinking) {
     tuh_kb_set_leds(KEYBOARD_LED_NUMLOCK | KEYBOARD_LED_CAPSLOCK | KEYBOARD_LED_SCROLLLOCK);
     blinking = false;
@@ -153,21 +160,24 @@ int64_t blink_callback(alarm_id_t id, void *user_data) {
   return 0;
 }
 
-int64_t kb_reset() {
+s64 kb_reset() {
   xt_send(0xaa);
   leds = 0;
   repeat = 0;
   blinking = true;
   add_alarm_in_ms(50, blink_callback, NULL, false);
+  resetter = 0;
   return 0;
 }
 
-int64_t reset_detect() {
+s64 reset_detect() {
   u8 pc = pio_sm_get_pc(pio0, 0);
   stuck = last_pc == pc ? stuck + 1 : 0;
   last_pc = pc;
+  printf("%1x ", stuck);
   
   if(stuck == 5) {
+    printf("reset detected!\n");
     stuck = 0;
     pio_sm_drain_tx_fifo(pio0, 0);
     if(resetter) cancel_alarm(resetter);
@@ -178,6 +188,11 @@ int64_t reset_detect() {
 }
 
 void kb_init() {
-  xtphy_program_init(pio0, 0, pio_add_program(pio0, &xtphy_program));
+  #ifdef XTPHY
+    xtphy_program_init(pio0, 0, pio_add_program(pio0, &xtphy_program));
+  #endif
+  #ifdef XTALT
+    xtalt_program_init(pio0, 0, pio_add_program(pio0, &xtalt_program));
+  #endif
   add_alarm_in_ms(1000, reset_detect, NULL, false);
 }

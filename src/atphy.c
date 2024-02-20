@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2022 No0ne (https://github.com/No0ne)
+ * Copyright (c) 2024 No0ne (https://github.com/No0ne)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -92,7 +92,7 @@ void kb_set_leds(u8 byte) {
   tuh_kb_set_leds(led2ps2[byte]);
 }
 
-int64_t blink_callback(alarm_id_t id, void *user_data) {
+s64 blink_callback(alarm_id_t id, void *user_data) {
   if(blinking) {
     kb_set_leds(KEYBOARD_LED_NUMLOCK | KEYBOARD_LED_CAPSLOCK | KEYBOARD_LED_SCROLLLOCK);
     blinking = false;
@@ -109,7 +109,7 @@ int64_t blink_callback(alarm_id_t id, void *user_data) {
   return 0;
 }
 
-int64_t kb_reset() {
+s64 kb_reset() {
   kb_enabled = true;
   repeat_us = 91743;
   delay_ms = 500;
@@ -118,7 +118,7 @@ int64_t kb_reset() {
   add_alarm_in_ms(1, blink_callback, NULL, false);
 }
 
-int64_t repeat_callback() {
+s64 repeat_callback() {
   if(repeat) {
     at_maybe_send_e0(repeat);
     

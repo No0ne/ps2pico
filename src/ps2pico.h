@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2022 No0ne (https://github.com/No0ne)
+ * Copyright (c) 2024 No0ne (https://github.com/No0ne)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,11 @@
 #include <stdbool.h>
 #include <string.h>
 
+typedef int8_t s8;
+typedef int16_t s16;
+typedef int32_t s32;
+typedef int64_t s64;
+
 typedef uint8_t u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
@@ -37,4 +42,4 @@ void tuh_kb_set_leds(u8 leds);
 void kb_init();
 void kb_task();
 void kb_send_key(u8 key, bool state, u8 modifiers);
-int64_t kb_reset();
+s64 kb_reset();

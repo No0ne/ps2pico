@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2022 No0ne (https://github.com/No0ne)
+ * Copyright (c) 2024 No0ne (https://github.com/No0ne)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -55,6 +55,7 @@ void tuh_hid_mount_cb(u8 dev_addr, u8 instance, u8 const* desc_report, u16 desc_
     }
     
     tuh_hid_receive_report(dev_addr, instance);
+    board_led_write(0);
   }
   
   printf("\n");
@@ -102,6 +103,7 @@ void tuh_hid_report_received_cb(u8 dev_addr, u8 instance, u8 const* report, u16 
         
         if(brk) {
           kb_send_key(prev_rpt[i], false, report[0]);
+          board_led_write(0);
         }
       }
       
@@ -117,6 +119,7 @@ void tuh_hid_report_received_cb(u8 dev_addr, u8 instance, u8 const* report, u16 
         
         if(make) {
           kb_send_key(report[i], true, report[0]);
+          board_led_write(1);
         }
       }
     }
@@ -130,6 +133,7 @@ void tuh_hid_report_received_cb(u8 dev_addr, u8 instance, u8 const* report, u16 
 
 void main() {
   board_init();
+  board_led_write(1);
   tuh_init(BOARD_TUH_RHPORT);
   kb_init();
   
@@ -139,6 +143,9 @@ void main() {
   #endif
   #ifdef XTPHY
     printf("XT version\n");
+  #endif
+  #ifdef XTALT
+    printf("XT ps2x2pico alt-version\n");
   #endif
   
   while(1) {
