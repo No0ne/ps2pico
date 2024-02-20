@@ -109,13 +109,13 @@ s64 blink_callback(alarm_id_t id, void *user_data) {
   return 0;
 }
 
-s64 kb_reset() {
+void kb_reset() {
   kb_enabled = true;
   repeat_us = 91743;
   delay_ms = 500;
   repeat = 0;
   blinking = true;
-  add_alarm_in_ms(1, blink_callback, NULL, false);
+  add_alarm_in_ms(50, blink_callback, NULL, false);
 }
 
 s64 repeat_callback() {

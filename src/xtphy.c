@@ -53,9 +53,7 @@ u8 last_pc;
 u8 stuck;
 
 bool blinking = false;
-
 alarm_id_t repeater;
-alarm_id_t resetter;
 
 void xt_send(u8 byte) {
   printf("TX: %02x\n", byte);
@@ -157,31 +155,28 @@ s64 blink_callback(alarm_id_t id, void *user_data) {
   }
   
   tuh_kb_set_leds(leds);
+  xt_send(0xaa);
   return 0;
 }
 
-s64 kb_reset() {
-  xt_send(0xaa);
+void kb_reset() {
   leds = 0;
   repeat = 0;
   blinking = true;
+  pio_sm_drain_tx_fifo(pio0, 0);
   add_alarm_in_ms(50, blink_callback, NULL, false);
-  resetter = 0;
-  return 0;
 }
 
 s64 reset_detect() {
   u8 pc = pio_sm_get_pc(pio0, 0);
   stuck = last_pc == pc ? stuck + 1 : 0;
   last_pc = pc;
-  printf("%1x ", stuck);
   
   if(stuck == 5) {
     printf("reset detected!\n");
     stuck = 0;
-    pio_sm_drain_tx_fifo(pio0, 0);
-    if(resetter) cancel_alarm(resetter);
-    resetter = add_alarm_in_ms(50, kb_reset, NULL, false);
+    kb_reset();
+    return 1000000;
   }
   
   return 5000;

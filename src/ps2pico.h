@@ -41,5 +41,5 @@ void tuh_kb_set_leds(u8 leds);
 
 void kb_init();
 void kb_task();
+void kb_reset();
 void kb_send_key(u8 key, bool state, u8 modifiers);
-s64 kb_reset();
