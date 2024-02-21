@@ -187,6 +187,9 @@ void kb_init() {
     xtphy_program_init(pio0, 0, pio_add_program(pio0, &xtphy_program));
   #endif
   #ifdef XTALT
+    gpio_init(LVPWR);
+    gpio_set_dir(LVPWR, GPIO_OUT);
+    gpio_put(LVPWR, 1);
     xtalt_program_init(pio0, 0, pio_add_program(pio0, &xtalt_program));
   #endif
   add_alarm_in_ms(1000, reset_detect, NULL, false);

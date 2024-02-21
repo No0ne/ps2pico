@@ -145,7 +145,7 @@ void main() {
     printf("XT version\n");
   #endif
   #ifdef XTALT
-    printf("XT ps2x2pico alt-version\n");
+    printf("XT ps2x2pico version\n");
   #endif
   
   while(1) {
