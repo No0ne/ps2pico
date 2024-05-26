@@ -32,6 +32,7 @@ GPIO 16 ___|2k2 |____|/  BC547             __|__
                        |                     |
                    ____|__GND________________|___
 ```
+![ps2pico](https://github.com/No0ne/ps2pico/assets/716129/b0133c44-c170-40f4-a3ad-c545aee92532)
 
 # NuXTv2
 If you have a [NuXTv2](https://monotech.fwscart.com/NuXT_v20_-_MicroATX_Turbo_XT_-_10MHz_832K_XT-IDE_Multi-IO_SVGA/p6083514_19777986.aspx) you can build an internal version of the ps2pico-XT! Replace U10 with the pico, remove RN13 and add two 4k7 pull-up resistors as shown below:
