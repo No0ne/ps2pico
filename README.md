@@ -6,6 +6,8 @@ USB keyboard to PS/2+AT or XT interface converter using a Raspberry Pi Pico
 
 Keyboard + Mouse variant: https://github.com/No0ne/ps2x2pico
 
+Additional excellent documentation by Ray: https://minuszerodegrees.net/keyboard/ps2pico.htm
+
 # Usage
 * Download `ps2pico.uf2` or `ps2pico-XT.uf2` from https://github.com/No0ne/ps2pico/releases
 * Copy `ps2pico.uf2` or `ps2pico-XT.uf2` to your Pi Pico by pressing BOOTSEL before pluggging in.
