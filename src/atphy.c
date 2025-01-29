@@ -51,6 +51,7 @@ u16 const delays[] = { 250, 500, 750, 1000 };
 queue_t qbytes;
 queue_t qpacks;
 
+u8 locked = 0;
 u8 busy = 0;
 u8 sent = 0;
 u8 last_tx = 0;
@@ -251,11 +252,13 @@ void kb_task() {
   }
   
   if(pio_interrupt_get(pio0, 1)) {
-    sent--;
+    if(sent > 0) sent--;
     pio_interrupt_clear(pio0, 1);
   }
+
+  if(locked && !busy) locked--;
   
-  if(!queue_is_empty(&qpacks) && pio_sm_is_tx_fifo_empty(pio0, 0) && !busy) {
+  if(!queue_is_empty(&qpacks) && !locked && !busy) {
     if(queue_try_peek(&qpacks, &pack)) {
       if(sent == pack[0]) {
         sent = 0;
@@ -264,6 +267,7 @@ void kb_task() {
         sent++;
         last_tx = pack[sent];
         busy |= 2;
+        locked = 160;
         pio_sm_put(pio0, 0, at_frame(last_tx));
       }
     }
@@ -301,5 +305,5 @@ void kb_task() {
 void kb_init() {
   atphy_program_init(pio0, 0, pio_add_program(pio0, &atphy_program));
   queue_init(&qbytes, sizeof(u8), 9);
-  queue_init(&qpacks, sizeof(u8) * 9, 16);
+  queue_init(&qpacks, sizeof(u8) * 18, 16);
 }

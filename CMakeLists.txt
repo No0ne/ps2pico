@@ -39,7 +39,7 @@ pico_generate_pio_header(ps2pico ${CMAKE_CURRENT_LIST_DIR}/src/xtphy.pio)
 pico_generate_pio_header(ps2pico ${CMAKE_CURRENT_LIST_DIR}/src/xtalt.pio)
 
 pico_set_program_name(ps2pico "ps2pico")
-pico_set_program_version(ps2pico "2.1")
+pico_set_program_version(ps2pico "2.2")
 
 pico_enable_stdio_uart(ps2pico 1)
 pico_enable_stdio_usb(ps2pico 0)

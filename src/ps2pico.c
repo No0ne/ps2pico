@@ -24,7 +24,7 @@
  */
 
 #include "ps2pico.h"
-#include "bsp/board.h"
+#include "bsp/board_api.h"
 #include "tusb.h"
 
 u8 kb_addr = 0;
