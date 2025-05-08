@@ -36,10 +36,12 @@ typedef int64_t s64;
 typedef uint8_t u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
+typedef uint64_t u64;
 
-void tuh_kb_set_leds(u8 leds);
+#define MAX_BOOT 6
+#define MAX_NKRO 16
+#define MAX_REPORT 8
 
 void kb_init();
 void kb_task();
-void kb_reset();
-void kb_send_key(u8 key, bool state, u8 modifiers);
+void kb_send_key(u8 key, bool state);
