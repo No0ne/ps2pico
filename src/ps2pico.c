@@ -163,6 +163,29 @@ void tuh_hid_report_received_cb(u8 dev_addr, u8 instance, u8 const* report, u16 
   printf("UKNOWN keyboard  len: %d\n", len);
 }
 
+s8 set_led = -1;
+u8 inst_loop = 0;
+u8 last_dev = 0;
+
+s64 set_led_callback() {
+  if(set_led == -1) return 50000;
+
+  if(keyboards[inst_loop].dev_addr && last_dev != keyboards[inst_loop].dev_addr) {
+    tuh_hid_set_report(keyboards[inst_loop].dev_addr, inst_loop, 0, HID_REPORT_TYPE_OUTPUT, &set_led, 1);
+    last_dev = keyboards[inst_loop].dev_addr;
+  }
+
+  inst_loop++;
+
+  if(inst_loop == CFG_TUH_HID) {
+    inst_loop = 0;
+    set_led = -1;
+    return 100000;
+  }
+
+  return 1000;
+}
+
 int main() {
   set_sys_clock_khz(120000, true);
 
@@ -176,6 +199,7 @@ int main() {
   tuh_init(BOARD_TUH_RHPORT);
 
   kb_init();
+  add_alarm_in_ms(500, set_led_callback, NULL, false);
 
   while(1) {
     tuh_task();

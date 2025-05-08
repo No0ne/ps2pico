@@ -30,7 +30,6 @@
 #include "pico/util/queue.h"
 
 bool kb_enabled = true;
-bool blinking = false;
 bool locked = false;
 
 u8 leds;
@@ -45,6 +44,7 @@ u16 delay_ms = 500;
 
 queue_t packets;
 alarm_id_t repeater;
+extern s8 set_led;
 
 u8 const led2ps2[] = { 0, 4, 1, 5, 2, 6, 3, 7 };
 u8 const mod2ps2[] = { 0x14, 0x12, 0x11, 0x1f, 0x14, 0x59, 0x11, 0x27 };
@@ -89,34 +89,13 @@ void ps2_send(u8 len) {
 
 void kb_set_leds(u8 byte) {
   if(byte > 7) byte = 0;
-  //tuh_kb_set_leds(led2ps2[byte]);
-  /* u8 last_dev = 0;
-  for(u8 i = 0; i < CFG_TUH_HID; i++) {
-    if(keyboards[i].dev_addr && last_dev != keyboards[i].dev_addr) {
-      //printf(" %d !! ", keyboards[i].dev_addr);
-      tuh_hid_set_report(keyboards[i].dev_addr, i, 0, HID_REPORT_TYPE_OUTPUT, &leds, sizeof(leds));
-      for(u8 j = 0; j < 200; j++) tuh_task();
-      for(u8 j = 0; j < 200; j++) tuh_task();
-      for(u8 j = 0; j < 200; j++) tuh_task();
-      for(u8 j = 0; j < 200; j++) tuh_task();
-      for(u8 j = 0; j < 200; j++) tuh_task();
-      //for(u8 j = 0; j < 200; j++) tuh_task();
-      last_dev = keyboards[i].dev_addr;
-    }
-  } */
+  set_led = led2ps2[byte];
 }
 
 s64 blink_callback() {
-  if(blinking) {
-    kb_set_leds(KEYBOARD_LED_NUMLOCK | KEYBOARD_LED_CAPSLOCK | KEYBOARD_LED_SCROLLLOCK);
-    blinking = false;
-    return 500000;
-  }
-
   kb_set_leds(0);
   packet[1] = 0xaa;
   ps2_send(1);
-
   return 0;
 }
 
@@ -150,7 +129,7 @@ s64 repeat_callback() {
 }
 
 void kb_receive(u8 byte, u8 prev_byte) {
-  switch (prev_byte) {
+  switch(prev_byte) {
     case 0xed: // Set LEDs
       kb_set_leds(byte);
     break;
@@ -161,14 +140,14 @@ void kb_receive(u8 byte, u8 prev_byte) {
     break;
 
     default:
-      switch (byte) {
+      switch(byte) {
         case 0xff: // Reset
           kb_enabled = true;
           repeat_us = 91743;
           delay_ms = 500;
           repeat = 0;
-          blinking = true;
-          add_alarm_in_ms(50, blink_callback, NULL, false);
+          kb_set_leds(KEYBOARD_LED_NUMLOCK | KEYBOARD_LED_CAPSLOCK | KEYBOARD_LED_SCROLLLOCK);
+          add_alarm_in_ms(500, blink_callback, NULL, false);
         break;
 
         case 0xee: // Echo
