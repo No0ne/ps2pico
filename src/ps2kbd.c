@@ -25,26 +25,25 @@
 
 #include "tusb.h"
 #include "ps2pico.h"
-#include "atphy.pio.h"
+#include "ps2phy.pio.h"
 #include "bsp/board_api.h"
 #include "pico/util/queue.h"
 
 bool kb_enabled = true;
-bool locked = false;
+bool phy_locked = false;
+extern s8 kb_set_led;
 
-u8 leds;
-u8 modifiers;
-u8 sent = 0;
-u8 packet[9];
-u8 last_rx = 0;
-u8 last_tx = 0;
-u8 repeat = 0;
-u32 repeat_us = 91743;
-u16 delay_ms = 500;
+u8 kb_modifiers = 0;
+u8 kb_repeat_key = 0;
+u16 kb_delay_ms = 500;
+u32 kb_repeat_us = 91743;
+alarm_id_t kb_repeater;
 
-queue_t packets;
-alarm_id_t repeater;
-extern s8 set_led;
+u8 phy_last_rx = 0;
+u8 phy_last_tx = 0;
+u8 phy_sent = 0;
+u8 phy_packet[9];
+queue_t phy_packets;
 
 u8 const led2ps2[] = { 0, 4, 1, 5, 2, 6, 3, 7 };
 u8 const mod2ps2[] = { 0x14, 0x12, 0x11, 0x1f, 0x14, 0x59, 0x11, 0x27 };
@@ -58,13 +57,13 @@ u8 const hid2ps2[] = {
   0x75, 0x7d, 0x70, 0x71, 0x61, 0x2f, 0x37, 0x0f, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38, 0x40,
   0x48, 0x50, 0x57, 0x5f
 };
-u32 const repeats[] = {
+u32 const kb_repeats[] = {
   33333, 37453, 41667, 45872, 48309, 54054, 58480, 62500,
   66667, 75188, 83333, 91743, 100000, 108696, 116279, 125000,
   133333, 149254, 166667, 181818, 200000, 217391, 232558, 250000,
   270270, 303030, 333333, 370370, 400000, 434783, 476190, 500000
 };
-u16 const delays[] = { 250, 500, 750, 1000 };
+u16 const kb_delays[] = { 250, 500, 750, 1000 };
 
 u32 ps2_frame(u8 byte) {
   bool parity = 1;
@@ -75,31 +74,29 @@ u32 ps2_frame(u8 byte) {
 }
 
 void ps2_send(u8 len) {
-  packet[0] = len;
-
-  /*printf("TX: ");
-  for(u8 i = 1; i <= packet[0]; i++) {
-    printf("%02x ", packet[i]);
-  }
-  printf("\n");*/
-
+  phy_packet[0] = len;
   board_led_write(1);
-  queue_try_add(&packets, &packet);
+  queue_try_add(&phy_packets, &phy_packet);
 }
 
 void kb_set_leds(u8 byte) {
   if(byte > 7) byte = 0;
-  set_led = led2ps2[byte];
+  kb_set_led = led2ps2[byte];
 }
 
-s64 blink_callback() {
+s64 reset_callback() {
   kb_set_leds(0);
-  packet[1] = 0xaa;
+  phy_packet[1] = 0xaa;
   ps2_send(1);
+  kb_enabled = true;
   return 0;
 }
 
-bool key_is_e0(u8 key) {
+bool key_is_modifier(u8 key) {
+  return key >= HID_KEY_CONTROL_LEFT && key <= HID_KEY_GUI_RIGHT;
+}
+
+bool key_is_extended(u8 key) {
   return key == HID_KEY_PRINT_SCREEN ||
         (key >= HID_KEY_INSERT && key <= HID_KEY_ARROW_UP) ||
          key == HID_KEY_KEYPAD_DIVIDE ||
@@ -109,22 +106,25 @@ bool key_is_e0(u8 key) {
         (key >= HID_KEY_GUI_LEFT && key != HID_KEY_SHIFT_RIGHT);
 }
 
-s64 repeat_callback() {
-  if(repeat) {
-    u8 len = 0;
-    if(key_is_e0(repeat)) packet[++len] = 0xe0;
+s64 kb_repeat_callback() {
+  if(kb_repeat_key) {
+    if(kb_enabled) {
+      u8 len = 0;
+      if(key_is_extended(kb_repeat_key)) phy_packet[++len] = 0xe0;
 
-    if(repeat >= HID_KEY_CONTROL_LEFT && repeat <= HID_KEY_GUI_RIGHT) {
-      packet[++len] = mod2ps2[repeat - HID_KEY_CONTROL_LEFT];
-    } else {
-      packet[++len] = hid2ps2[repeat];
+      if(key_is_modifier(kb_repeat_key)) {
+        phy_packet[++len] = mod2ps2[kb_repeat_key - HID_KEY_CONTROL_LEFT];
+      } else {
+        phy_packet[++len] = hid2ps2[kb_repeat_key];
+      }
+
+      ps2_send(len);
     }
 
-    ps2_send(len);
-    return repeat_us;
+    return kb_repeat_us;
   }
 
-  repeater = 0;
+  kb_repeater = 0;
   return 0;
 }
 
@@ -135,30 +135,30 @@ void kb_receive(u8 byte, u8 prev_byte) {
     break;
 
     case 0xf3: // Set typematic rate and delay
-      repeat_us = repeats[byte & 0x1f];
-      delay_ms = delays[(byte & 0x60) >> 5];
+      kb_repeat_us = kb_repeats[byte & 0x1f];
+      kb_delay_ms = kb_delays[(byte & 0x60) >> 5];
     break;
 
     default:
       switch(byte) {
         case 0xff: // Reset
-          kb_enabled = true;
-          repeat_us = 91743;
-          delay_ms = 500;
-          repeat = 0;
+          kb_enabled = false;
+          kb_repeat_us = 91743;
+          kb_delay_ms = 500;
           kb_set_leds(KEYBOARD_LED_NUMLOCK | KEYBOARD_LED_CAPSLOCK | KEYBOARD_LED_SCROLLLOCK);
-          add_alarm_in_ms(500, blink_callback, NULL, false);
+          add_alarm_in_ms(500, reset_callback, NULL, false);
+          printf("resetting...\n");
         break;
 
         case 0xee: // Echo
-          packet[1] = 0xee;
+          phy_packet[1] = 0xee;
           ps2_send(1);
         return;
 
         case 0xf2: // Identify keyboard
-          packet[1] = 0xfa;
-          packet[2] = 0xab;
-          packet[3] = 0x83;
+          phy_packet[1] = 0xfa;
+          phy_packet[2] = 0xab;
+          phy_packet[3] = 0x83;
           ps2_send(3);
         return;
 
@@ -169,25 +169,24 @@ void kb_receive(u8 byte, u8 prev_byte) {
         case 0xf5: // Disable scanning, restore default parameters
         case 0xf6: // Set default parameters
           kb_enabled = byte == 0xf6;
-          repeat_us = 91743;
-          delay_ms = 500;
-          repeat = 0;
+          kb_repeat_us = 91743;
+          kb_delay_ms = 500;
           kb_set_leds(0);
         break;
       }
     break;
   }
 
-  packet[1] = 0xfa;
+  phy_packet[1] = 0xfa;
   ps2_send(1);
 }
 
 void kb_send_key(u8 key, bool state) {
   if(key >= HID_KEY_CONTROL_LEFT && key <= HID_KEY_GUI_RIGHT) {
     if(state) {
-      modifiers = modifiers | (1 << (key - HID_KEY_CONTROL_LEFT));
+      kb_modifiers = kb_modifiers | (1 << (key - HID_KEY_CONTROL_LEFT));
     } else {
-      modifiers = modifiers & ~(1 << (key - HID_KEY_CONTROL_LEFT));
+      kb_modifiers = kb_modifiers & ~(1 << (key - HID_KEY_CONTROL_LEFT));
     }
   } else if(key < HID_KEY_A || key > HID_KEY_F24) {
     return;
@@ -202,25 +201,25 @@ void kb_send_key(u8 key, bool state) {
   }
 
   if(key == HID_KEY_PAUSE) {
-    repeat = 0;
+    kb_repeat_key = 0;
 
     if(state) {
-      if(modifiers & KEYBOARD_MODIFIER_LEFTCTRL ||
-         modifiers & KEYBOARD_MODIFIER_RIGHTCTRL) {
-        packet[++len] = 0xe0;
-        packet[++len] = 0x7e;
-        packet[++len] = 0xe0;
-        packet[++len] = 0xf0;
-        packet[++len] = 0x7e;
+      if(kb_modifiers & KEYBOARD_MODIFIER_LEFTCTRL ||
+         kb_modifiers & KEYBOARD_MODIFIER_RIGHTCTRL) {
+        phy_packet[++len] = 0xe0;
+        phy_packet[++len] = 0x7e;
+        phy_packet[++len] = 0xe0;
+        phy_packet[++len] = 0xf0;
+        phy_packet[++len] = 0x7e;
       } else {
-        packet[++len] = 0xe1;
-        packet[++len] = 0x14;
-        packet[++len] = 0x77;
-        packet[++len] = 0xe1;
-        packet[++len] = 0xf0;
-        packet[++len] = 0x14;
-        packet[++len] = 0xf0;
-        packet[++len] = 0x77;
+        phy_packet[++len] = 0xe1;
+        phy_packet[++len] = 0x14;
+        phy_packet[++len] = 0x77;
+        phy_packet[++len] = 0xe1;
+        phy_packet[++len] = 0xf0;
+        phy_packet[++len] = 0x14;
+        phy_packet[++len] = 0xf0;
+        phy_packet[++len] = 0x77;
       }
 
       ps2_send(len);
@@ -229,21 +228,21 @@ void kb_send_key(u8 key, bool state) {
     return;
   }
 
-  if(key_is_e0(key)) packet[++len] = 0xe0;
+  if(key_is_extended(key)) phy_packet[++len] = 0xe0;
 
   if(state) {
-    repeat = key;
-    if(repeater) cancel_alarm(repeater);
-    repeater = add_alarm_in_ms(delay_ms, repeat_callback, NULL, false);
+    kb_repeat_key = key;
+    if(kb_repeater) cancel_alarm(kb_repeater);
+    kb_repeater = add_alarm_in_ms(kb_delay_ms, kb_repeat_callback, NULL, false);
   } else {
-    if(key == repeat) repeat = 0;
-    packet[++len] = 0xf0;
+    if(key == kb_repeat_key) kb_repeat_key = 0;
+    phy_packet[++len] = 0xf0;
   }
 
   if(key >= HID_KEY_CONTROL_LEFT && key <= HID_KEY_GUI_RIGHT) {
-    packet[++len] = mod2ps2[key - HID_KEY_CONTROL_LEFT];
+    phy_packet[++len] = mod2ps2[key - HID_KEY_CONTROL_LEFT];
   } else {
-    packet[++len] = hid2ps2[key];
+    phy_packet[++len] = hid2ps2[key];
   }
 
   ps2_send(len);
@@ -251,27 +250,26 @@ void kb_send_key(u8 key, bool state) {
 
 void kb_task() {
   if(pio_interrupt_get(pio0, 1)) {
-    if(sent > 0) sent--;
+    if(phy_sent > 0) phy_sent--;
     pio_interrupt_clear(pio0, 1);
   }
 
-  if(!locked && !queue_is_empty(&packets) && !pio_interrupt_get(pio0, 0)) {
-    if(queue_try_peek(&packets, &packet)) {
-      if(sent == packet[0]) {
-        sent = 0;
-        queue_try_remove(&packets, &packet);
+  if(!phy_locked && !queue_is_empty(&phy_packets) && !pio_interrupt_get(pio0, 0)) {
+    if(queue_try_peek(&phy_packets, &phy_packet)) {
+      if(phy_sent == phy_packet[0]) {
+        phy_sent = 0;
+        queue_try_remove(&phy_packets, &phy_packet);
         board_led_write(0);
       } else {
-        sent++;
-        last_tx = packet[sent];
-        locked = true;
-        //printf(" put %02x \n", last_tx);
-        pio_sm_put(pio0, 0, ps2_frame(last_tx));
+        phy_sent++;
+        phy_last_tx = phy_packet[phy_sent];
+        phy_locked = true;
+        pio_sm_put(pio0, 0, ps2_frame(phy_last_tx));
       }
     }
   }
 
-  if(locked && pio_interrupt_get(pio0, 0)) locked = false;
+  if(phy_locked && pio_interrupt_get(pio0, 0)) phy_locked = false;
 
   if(!pio_sm_is_rx_fifo_empty(pio0, 1)) {
     u32 fifo = pio_sm_get(pio0, 1) >> 23;
@@ -287,22 +285,20 @@ void kb_task() {
     }
 
     if((fifo & 0xff) == 0xfe) {
-      pio_sm_put(pio0, 0, ps2_frame(last_tx));
+      pio_sm_put(pio0, 0, ps2_frame(phy_last_tx));
       return;
     }
 
-    while(queue_try_remove(&packets, &packet));
-    sent = 0;
+    while(queue_try_remove(&phy_packets, &phy_packet));
+    phy_sent = 0;
 
-    //printf("RX: 0x%02lx\n", fifo & 0xff);
-
-    kb_receive(fifo, last_rx);
-    last_rx = fifo;
+    kb_receive(fifo, phy_last_rx);
+    phy_last_rx = fifo;
   }
 }
 
 void kb_init() {
   ps2write_program_init(pio0, 0, pio_add_program(pio0, &ps2write_program));
   ps2read_program_init(pio0, 1, pio_add_program(pio0, &ps2read_program));
-  queue_init(&packets, 9, 32);
+  queue_init(&phy_packets, 9, 32);
 }

@@ -38,6 +38,29 @@ struct {
   u8 nkro[MAX_NKRO];
 } keyboards[CFG_TUH_HID];
 
+s8 kb_set_led = -1;
+u8 kb_inst_loop = 0;
+u8 kb_last_dev = 0;
+
+s64 kb_set_led_callback() {
+  if(kb_set_led == -1) return 50000;
+
+  if(keyboards[kb_inst_loop].dev_addr && kb_last_dev != keyboards[kb_inst_loop].dev_addr) {
+    tuh_hid_set_report(keyboards[kb_inst_loop].dev_addr, kb_inst_loop, 0, HID_REPORT_TYPE_OUTPUT, &kb_set_led, 1);
+    kb_last_dev = keyboards[kb_inst_loop].dev_addr;
+  }
+
+  kb_inst_loop++;
+
+  if(kb_inst_loop == CFG_TUH_HID) {
+    kb_inst_loop = 0;
+    kb_set_led = -1;
+    return 100000;
+  }
+
+  return 1000;
+}
+
 void tuh_hid_mount_cb(u8 dev_addr, u8 instance, u8 const* desc_report, u16 desc_len) {
   if(tuh_hid_interface_protocol(dev_addr, instance) == HID_ITF_PROTOCOL_MOUSE) return;
 
@@ -83,11 +106,6 @@ void tuh_hid_report_received_cb(u8 dev_addr, u8 instance, u8 const* report, u16 
   if(!rpt_info) return;
   board_led_write(1);
   tuh_hid_receive_report(dev_addr, instance);
-
-  if(rpt_info->usage_page == HID_USAGE_PAGE_CONSUMER && rpt_info->usage == HID_USAGE_CONSUMER_CONTROL) {
-    printf("len %d  %02x %02x %02x %02x\n", len, report[0], report[1], report[2], report[3]);
-    return;
-  }
 
   if(rpt_info->usage_page != HID_USAGE_PAGE_DESKTOP || rpt_info->usage != HID_USAGE_DESKTOP_KEYBOARD) {
     printf("UNKNOWN key  usage_page: %02x  usage: %02x\n", rpt_info->usage_page, rpt_info->usage);
@@ -163,43 +181,19 @@ void tuh_hid_report_received_cb(u8 dev_addr, u8 instance, u8 const* report, u16 
   printf("UKNOWN keyboard  len: %d\n", len);
 }
 
-s8 set_led = -1;
-u8 inst_loop = 0;
-u8 last_dev = 0;
-
-s64 set_led_callback() {
-  if(set_led == -1) return 50000;
-
-  if(keyboards[inst_loop].dev_addr && last_dev != keyboards[inst_loop].dev_addr) {
-    tuh_hid_set_report(keyboards[inst_loop].dev_addr, inst_loop, 0, HID_REPORT_TYPE_OUTPUT, &set_led, 1);
-    last_dev = keyboards[inst_loop].dev_addr;
-  }
-
-  inst_loop++;
-
-  if(inst_loop == CFG_TUH_HID) {
-    inst_loop = 0;
-    set_led = -1;
-    return 100000;
-  }
-
-  return 1000;
-}
-
 int main() {
   set_sys_clock_khz(120000, true);
 
   board_init();
   board_led_write(1);
 
-  printf("\n%s-%s ", PICO_PROGRAM_NAME, PICO_PROGRAM_VERSION_STRING);
-  printf("PS/2+AT version\n");
+  printf("\n%s-%s PS/2+AT version\n", PICO_PROGRAM_NAME, PICO_PROGRAM_VERSION_STRING);
 
   tuh_hid_set_default_protocol(HID_PROTOCOL_REPORT);
   tuh_init(BOARD_TUH_RHPORT);
 
   kb_init();
-  add_alarm_in_ms(500, set_led_callback, NULL, false);
+  add_alarm_in_ms(500, kb_set_led_callback, NULL, false);
 
   while(1) {
     tuh_task();
