@@ -23,6 +23,7 @@ loop:
 write:
   out    pins, 1                    // write out data
   set    pins, 1                    // set clock low
+  nop                               // cycle delay
   jmp    x--, loop                  // iterate
 
 
@@ -57,7 +58,7 @@ loop:
     pio_gpio_init(pio, CLOCKOUT);
     pio_gpio_init(pio, DATAOUT);
 
-    sm_config_set_clkdiv(&c, 1500);
+    sm_config_set_clkdiv(&c, 1250);
     sm_config_set_jmp_pin(&c, CLOCKIN);
     sm_config_set_set_pins(&c, CLOCKOUT, 1);
     sm_config_set_out_pins(&c, DATAOUT, 1);
